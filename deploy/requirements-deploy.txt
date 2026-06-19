@@ -1,0 +1,11 @@
+# Minimal deps for the autonomous PAPER autopilot + live dashboard.
+numpy
+pandas
+yfinance
+scikit-learn
+pydantic
+python-dotenv
+fastapi
+uvicorn[standard]
+# For LIVE trading later, also: kiteconnect
+# For the LLM deep-dive (optional, not used by the deterministic autopilot): openai

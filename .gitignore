@@ -1,0 +1,10 @@
+.env
+*.env
+!deploy/.env.example
+data_cache/
+results/
+reports/
+__pycache__/
+*.pyc
+_llm_cache/
+.DS_Store

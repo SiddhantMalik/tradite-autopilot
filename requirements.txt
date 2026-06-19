@@ -1,0 +1,30 @@
+# --- Core harness (required) ---
+numpy
+pandas
+xgboost
+
+# --- Price data (required for real data) ---
+yfinance
+
+# --- LSTM model (optional, recommended) ---
+# CPU build: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch
+
+# --- Sentiment engine (required for sentiment/) ---
+pydantic
+feedparser
+
+# --- FinBERT scorer (optional; ~440MB model on first use, falls back to lexicon) ---
+transformers
+
+# --- Project environment (loads tradite/.env automatically, no shell profile needed) ---
+python-dotenv
+
+# --- LLM sentiment backend ---
+# DigitalOcean serverless inference (OpenAI-compatible) is the primary real backend:
+#   Keys live in tradite/.env — loaded automatically via python-dotenv in config.py
+openai          # OpenAI SDK — used by BOTH the digitalocean and openai backends
+# anthropic     # only for the anthropic backend
+
+# --- Reddit social (optional; needs a Reddit app + REDDIT_CLIENT_ID/SECRET) ---
+# praw

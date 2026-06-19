@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "name": "tradite-autopilot",
+    "region": "blr",
+    "services": [
+      {
+        "name": "autopilot",
+        "github": {
+          "repo": "REPLACE_WITH/OWNER_REPO",
+          "branch": "main",
+          "deploy_on_push": true
+        },
+        "source_dir": "/",
+        "dockerfile_path": "deploy/Dockerfile",
+        "http_port": 8080,
+        "instance_size_slug": "basic-xxs",
+        "instance_count": 1,
+        "health_check": { "http_path": "/healthz" },
+        "routes": [ { "path": "/" } ],
+        "envs": [
+          { "key": "TRADITE_START_CAPITAL", "value": "10000000" },
+          { "key": "TRADITE_TARGET_NAMES", "value": "8" },
+          { "key": "TRADITE_MONITOR_MIN", "value": "30" },
+          { "key": "TRADITE_DECIDE_AT", "value": "15:45" }
+        ]
+      }
+    ]
+  }
+}
