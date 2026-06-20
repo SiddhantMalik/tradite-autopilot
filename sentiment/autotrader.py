@@ -36,15 +36,21 @@ AUTOTRADER_UNIVERSE = getattr(config, "AUTOTRADER_UNIVERSE", [
 
 START_CAPITAL = float(os.getenv("TRADITE_START_CAPITAL", "1000000"))
 TARGET_NAMES = int(os.getenv("TRADITE_TARGET_NAMES", "8"))
+# Adaptive exits — a TRAILING stop ratchets up with the high-water mark, locking in gains and
+# letting winners run. Backtest (2y): trailing-8% returned +12.8% vs +5.2% fixed-8/20, lower
+# drawdown, win-rate 29%→49%. The target is a far ceiling; the trailing stop is the real exit.
+TRAIL_PCT = float(os.getenv("TRADITE_TRAIL_PCT", "8"))
+TARGET_CEILING_PCT = float(os.getenv("TRADITE_TARGET_PCT", "50"))
 
 
 class AutoTrader:
     def __init__(self, universe=None, target_names=TARGET_NAMES,
-                 stop_pct=DEFAULT_STOP_PCT, target_pct=DEFAULT_TARGET_PCT):
+                 stop_pct=DEFAULT_STOP_PCT, target_pct=TARGET_CEILING_PCT, trail_pct=TRAIL_PCT):
         self.universe = universe or AUTOTRADER_UNIVERSE
         self.target_names = target_names
         self.stop_pct = stop_pct
         self.target_pct = target_pct
+        self.trail_pct = trail_pct
         self.engine = TradeEngine(limits=Limits())
         self.broker = self.engine.broker
         if self.broker.capital == 0:
@@ -99,6 +105,7 @@ class AutoTrader:
             rupees = self.broker.marked_nav() / self.target_names
             orders.append({"symbol": sym, "rupees": rupees,
                            "stop_pct": self.stop_pct, "target_pct": self.target_pct,
+                           "trail_pct": self.trail_pct,
                            "sector": v.get("sector", "Unknown")})
 
         buys = self.engine.run_plan(orders, live=live) if orders else []

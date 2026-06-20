@@ -88,7 +88,7 @@ class PaperBroker:
             self.day_start_nav = self.marked_nav()
 
     # ── orders ───────────────────────────────────────────────────────────────
-    def buy(self, symbol, qty, price, stop_pct, target_pct, sector):
+    def buy(self, symbol, qty, price, stop_pct, target_pct, sector, trail_pct=0):
         cost = qty * price
         self.cash -= cost
         if symbol in self.positions:                      # average up
@@ -96,12 +96,14 @@ class PaperBroker:
             p["avg"] = (p["qty"] * p["avg"] + cost) / tot; p["qty"] = tot
             p["stop"] = round(p["avg"] * (1 - stop_pct / 100), 2)
             p["target"] = round(p["avg"] * (1 + target_pct / 100), 2)
+            p["high"] = max(p.get("high", price), price)
         else:
             self.positions[symbol] = {
                 "qty": qty, "avg": round(price, 2),
-                "stop_pct": stop_pct, "target_pct": target_pct,
+                "stop_pct": stop_pct, "target_pct": target_pct, "trail_pct": trail_pct,
                 "stop": round(price * (1 - stop_pct / 100), 2),
                 "target": round(price * (1 + target_pct / 100), 2),
+                "high": round(price, 2),         # high-water mark for the trailing stop
                 "sector": sector, "entry_date": _today(),
             }
         self.trades.append({"ts": _now(), "action": "BUY", "symbol": symbol,
@@ -119,16 +121,25 @@ class PaperBroker:
         return pnl
 
     def mark(self, prices: dict) -> list[dict]:
-        """The profit mechanism: auto-exit any position that hit target or stop."""
+        """The profit mechanism: trail the stop up with the high-water mark, then
+        auto-exit any position that hit its (trailed) stop or its target."""
         exits = []
         for sym in list(self.positions):
             px = prices.get(sym)
             if px is None:
                 continue
             p = self.positions[sym]
+            # ratchet the stop UP as price makes new highs (never down) — locks in gains
+            tp = p.get("trail_pct", 0)
+            if px > p.get("high", p["avg"]):
+                p["high"] = round(px, 2)
+            if tp:
+                p["stop"] = max(p["stop"], round(p["high"] * (1 - tp / 100), 2))
             if px <= p["stop"]:
-                pnl = self.sell(sym, p["stop"], "STOP")          # fill at stop (conservative)
-                exits.append({"symbol": sym, "reason": "STOP-LOSS", "price": p["stop"], "pnl": pnl})
+                trailed = p["stop"] >= p["avg"]              # stop above cost ⇒ a profitable trail
+                reason = "TRAIL (profit locked)" if trailed else "STOP-LOSS"
+                pnl = self.sell(sym, p["stop"], "TRAIL" if trailed else "STOP")
+                exits.append({"symbol": sym, "reason": reason, "price": p["stop"], "pnl": pnl})
             elif px >= p["target"]:
                 pnl = self.sell(sym, p["target"], "TARGET")
                 exits.append({"symbol": sym, "reason": "TARGET (profit booked)", "price": p["target"], "pnl": pnl})

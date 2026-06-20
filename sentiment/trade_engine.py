@@ -33,6 +33,7 @@ from .risk_gate import RiskGate, Limits
 
 DEFAULT_STOP_PCT = float(os.getenv("TRADITE_DEFAULT_STOP_PCT", "8"))
 DEFAULT_TARGET_PCT = float(os.getenv("TRADITE_DEFAULT_TARGET_PCT", "20"))
+DEFAULT_TRAIL_PCT = float(os.getenv("TRADITE_TRAIL_PCT", "0"))   # 0 = no trail (manual CLI); autopilot sets it
 
 
 # ── price source (free) ──────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ class TradeEngine:
                 "symbol": sym, "rupees": float(o.get("rupees", 0)), "price": price,
                 "stop_pct": float(o.get("stop_pct", DEFAULT_STOP_PCT)),
                 "target_pct": float(o.get("target_pct", DEFAULT_TARGET_PCT)),
+                "trail_pct": float(o.get("trail_pct", DEFAULT_TRAIL_PCT)),
                 "sector": o.get("sector", "Unknown"),
             }
             res = gate.check_order(order, self.broker)
@@ -104,9 +106,10 @@ class TradeEngine:
                     rec["live"] = self._live_buy(sym, res["qty"], price, order)
                 else:
                     self.broker.buy(sym, res["qty"], price, order["stop_pct"],
-                                    order["target_pct"], order["sector"])
+                                    order["target_pct"], order["sector"], order["trail_pct"])
+                    trail = f", trail {order['trail_pct']:.0f}%" if order["trail_pct"] else ""
                     rec["filled"] = f"BUY {res['qty']}×{sym} @₹{price:,.2f} " \
-                                    f"(stop −{order['stop_pct']:.0f}%, target +{order['target_pct']:.0f}%)"
+                                    f"(stop −{order['stop_pct']:.0f}%{trail}, target +{order['target_pct']:.0f}%)"
             records.append(rec)
         return records
 
