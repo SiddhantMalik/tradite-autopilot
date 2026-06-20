@@ -99,6 +99,19 @@ def run_loop():
     last_monitor = 0.0
     decided_on = None
     reported_on = None
+
+    # Cold start: on a fresh deploy the book is empty — initialize and make the first
+    # allocation immediately so the dashboard shows a real ₹1cr portfolio right away,
+    # instead of ₹0 until the next scheduled decision.
+    try:
+        if TradeEngine().broker.capital == 0 or not TradeEngine().broker.positions:
+            _log("cold start: funding book + first allocation …")
+            do_decide()
+            do_report("cold-start")
+            decided_on = _ist_now().date()
+    except Exception as e:  # noqa: BLE001
+        _log(f"cold-start error: {e}")
+
     while True:
         now = _ist_now()
         try:
