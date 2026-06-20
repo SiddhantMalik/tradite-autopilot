@@ -64,6 +64,43 @@ def healthz():
     return {"ok": True}
 
 
+@app.get("/api/analyze")
+def api_analyze(symbol: str = ""):
+    """On-demand analysis of ANY NSE symbol: valuation verdict + measured base rate + news."""
+    sym = (symbol or "").strip().upper().replace("NSE:", "").replace(".NS", "")
+    if not sym:
+        return JSONResponse({"error": "no symbol"})
+    tkr = sym + ".NS"
+    try:
+        from .valuation import value_verdict
+        from .base_rates import base_rate
+        from .news_adapter import news_signal
+        v = value_verdict(tkr)
+        if v.get("error"):
+            return JSONResponse({"error": f"{sym}: {v['error']} (use the NSE symbol, e.g. TCS)"})
+        sc = v.get("scorecard", [])
+        br = base_rate(tkr)
+        ns = news_signal(tkr)
+        return JSONResponse({
+            "symbol": sym, "name": v.get("name"), "sector": v.get("sector"),
+            "price": v.get("price"), "verdict": v.get("verdict"), "score": v.get("score"),
+            "buy_below": v.get("buy_below"), "pe": v.get("pe"), "fwd_pe": v.get("fwd_pe"),
+            "pb": v.get("pb"), "roe": v.get("roe"), "earn_yield": v.get("earn_yield"),
+            "pct_from_hi": v.get("pct_from_hi"), "rsi": v.get("rsi"),
+            "drivers": [f"{n} [{d}]" for n, p, d in sc if p > 0],
+            "drags": [f"{n} [{d}]" for n, p, d in sc if p < 0],
+            "base_rate": ({"verdict": br.get("verdict"), "cond": br.get("cond"),
+                           "uncond": br.get("uncond"),
+                           "setup": f"RSI {br.get('rsi',0):.0f}, {br.get('position','')}"}
+                          if not br.get("error") else {"error": br.get("error")}),
+            "news": ({"net": ns.get("net"), "tags": ns.get("tags"), "bearish": ns.get("bearish"),
+                      "bullish": ns.get("bullish"), "top": ns.get("top", [])}
+                     if ns.get("ok") else {"n": 0}),
+        })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)})
+
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     return _HTML
@@ -93,6 +130,13 @@ _HTML = """<!doctype html><html><head><meta charset="utf-8">
 </style></head><body>
 <header><h1>📈 Tradite Autopilot</h1><span class="mode" id="mode">PAPER</span></header>
 <div class="wrap">
+ <div style="display:flex;gap:8px;margin-bottom:16px">
+  <input id="q" placeholder="Search any NSE stock for analysis — e.g. TCS, RELIANCE, SBIN"
+   onkeydown="if(event.key==='Enter')analyze()"
+   style="flex:1;background:var(--panel);border:1px solid var(--ln);color:var(--tx);padding:10px 12px;border-radius:8px;font-size:14px">
+  <button onclick="analyze()" style="background:var(--acc);color:#04101f;border:0;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer">Analyze</button>
+ </div>
+ <div id="ares"></div>
  <div class="cards" id="cards"></div>
  <h2>Positions</h2><div id="pos"></div>
  <h2>Active exit orders (resting in market)</h2><div id="ord"></div>
@@ -129,5 +173,30 @@ function tbl(h,rows){ if(!rows.length) return '';
  return '<table><thead><tr>'+h.map(x=>`<th>${x}</th>`).join('')+'</tr></thead><tbody>'+
   rows.map(r=>'<tr>'+r.map(c=>`<td>${c}</td>`).join('')+'</tr>').join('')+'</tbody></table>';}
 function empty(){return '<div class="card mut">none</div>';}
+function f1(x){return (typeof x==='number'&&isFinite(x))?x.toFixed(1):'n/a';}
+function pc(x){return (typeof x==='number')?Math.round(x*100)+'%':'n/a';}
+async function analyze(){
+ const sym=document.getElementById('q').value.trim(); if(!sym)return;
+ const el=document.getElementById('ares');
+ el.innerHTML=`<div class="card mut">Analyzing ${sym.toUpperCase()} … (valuation + base rate + news, ~10-15s)</div>`;
+ let d; try{ d=await (await fetch('/api/analyze?symbol='+encodeURIComponent(sym))).json(); }
+ catch(e){ el.innerHTML='<div class="card r">request failed</div>'; return; }
+ if(d.error){ el.innerHTML='<div class="card r">'+d.error+'</div>'; return; }
+ const vc=d.verdict&&d.verdict.indexOf('WORTH')===0?'g':(d.verdict&&d.verdict.indexOf('AVOID')===0?'r':'');
+ const br=d.base_rate||{}, ns=d.news||{};
+ const brTxt = br.error?br.error:(br.verdict?`${br.verdict}${br.cond?` — fwd-20d mean ${f1(br.cond.mean)}% vs base ${f1((d.base_rate.uncond||{}).mean)}% (n=${br.cond.n})`:''}`:'n/a');
+ const newsTxt = ns.bearish?'<span class="r">BEARISH</span>':(ns.bullish?'<span class="g">bullish</span>':'neutral');
+ el.innerHTML=`<div class="card">
+   <div style="font-size:16px;font-weight:700">${d.symbol} — ${d.name||''} <span class="mut" style="font-size:12px">${d.sector||''}</span></div>
+   <div style="margin:6px 0;font-size:15px"><span class="${vc}" style="font-weight:700">${d.verdict||''}</span>
+     <span class="mut">· score ${d.score}${isFinite(d.buy_below)?' · buy-below ₹'+Math.round(d.buy_below).toLocaleString('en-IN'):''}</span></div>
+   <div class="mut" style="font-size:13px">LTP ₹${Math.round(d.price).toLocaleString('en-IN')} · P/E ${f1(d.pe)} (fwd ${f1(d.fwd_pe)}) · P/B ${f1(d.pb)} · ROE ${pc(d.roe)} · earnings-yield ${f1(d.earn_yield)}% · ${Math.round(d.pct_from_hi)}% vs 52w-high · RSI ${Math.round(d.rsi)}</div>
+   <div style="margin-top:8px;font-size:13px"><span class="g">▲ for</span> ${(d.drivers||[]).join('; ')||'—'}</div>
+   <div style="font-size:13px"><span class="r">▼ against</span> ${(d.drags||[]).join('; ')||'—'}</div>
+   <div style="margin-top:8px;font-size:13px">Measured base rate: ${brTxt}</div>
+   <div style="margin-top:4px;font-size:13px">News: ${newsTxt} ${ns.tags&&ns.tags.length?'['+ns.tags.join(', ')+']':''}</div>
+   ${(ns.top||[]).map(h=>`<div class="mut" style="font-size:12px">• [${h.score>0?'+':''}${h.score}] ${h.title}</div>`).join('')}
+ </div>`;
+}
 load(); setInterval(load,30000);
 </script></body></html>"""

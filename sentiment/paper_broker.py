@@ -93,7 +93,7 @@ class PaperBroker:
     # ── orders ───────────────────────────────────────────────────────────────
     def buy(self, symbol, qty, price, stop_pct, target_pct, sector, trail_pct=0, tp1_pct=0):
         cost = qty * price
-        fee = trade_cost(cost)
+        fee = trade_cost(cost, "buy")
         self.cash -= cost + fee
         self.total_costs += fee
         if symbol in self.positions:                      # average up
@@ -119,7 +119,7 @@ class PaperBroker:
     def sell(self, symbol, price, reason) -> float:
         p = self.positions.pop(symbol)
         proceeds = p["qty"] * price
-        fee = trade_cost(proceeds)
+        fee = trade_cost(proceeds, "sell")
         pnl = (price - p["avg"]) * p["qty"]
         self.cash += proceeds - fee
         self.realized_pnl += pnl
@@ -148,7 +148,7 @@ class PaperBroker:
             tp1 = p.get("tp1_pct", 0)
             if tp1 and not p.get("scaled") and p["qty"] >= 2 and px >= p["avg"] * (1 + tp1 / 100):
                 half = p["qty"] // 2
-                proceeds = half * px; fee = trade_cost(proceeds)
+                proceeds = half * px; fee = trade_cost(proceeds, "sell")
                 pnl = (px - p["avg"]) * half
                 self.cash += proceeds - fee
                 self.realized_pnl += pnl; self.total_costs += fee
