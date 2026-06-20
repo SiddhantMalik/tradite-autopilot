@@ -39,6 +39,9 @@ _LIVE = os.getenv("TRADITE_AUTOPILOT_LIVE") == "I_UNDERSTAND"
 # (with TRADITE_DECIDE_WEEKDAY) to switch to a lower-turnover weekly cadence instead.
 DECIDE_DAILY = os.getenv("TRADITE_DECIDE_DAILY", "true").lower() == "true"
 DECIDE_WEEKDAY = int(os.getenv("TRADITE_DECIDE_WEEKDAY", "0"))   # 0=Mon .. 4=Fri
+# INTRADAY decisions: re-decide (new buys + news/verdict sells) every N minutes during market
+# hours, so it acts through the day — not just once at close. 0 = once daily at DECIDE_AT.
+DECIDE_EVERY_MIN = int(os.getenv("TRADITE_DECIDE_EVERY_MIN", "60"))
 
 
 def _ist_now() -> datetime:
@@ -105,6 +108,7 @@ def run_loop():
     _log(f"autopilot started — monitor every {MONITOR_EVERY_MIN}m in market hours, "
          f"decide at {DECIDE_AT_IST} IST, mode={'LIVE' if _LIVE else 'PAPER'}")
     last_monitor = 0.0
+    last_decide = time.time()      # cold-start already decided; wait one interval before the next
     decided_on = None
     reported_on = None
 
@@ -123,13 +127,19 @@ def run_loop():
     while True:
         now = _ist_now()
         try:
-            if _in_market_hours() and (time.time() - last_monitor) >= MONITOR_EVERY_MIN * 60:
-                do_monitor(); last_monitor = time.time()
-            is_decide_day = now.weekday() < 5 and (DECIDE_DAILY or now.weekday() == DECIDE_WEEKDAY)
-            if is_decide_day and now.strftime("%H:%M") >= DECIDE_AT_IST and decided_on != now.date():
-                do_decide(); decided_on = now.date()
-            if now.weekday() < 5 and now.strftime("%H:%M") >= DECIDE_AT_IST and reported_on != now.date():
-                do_report("EOD"); reported_on = now.date()
+            if _in_market_hours():
+                if (time.time() - last_monitor) >= MONITOR_EVERY_MIN * 60:
+                    do_monitor(); last_monitor = time.time()
+                # INTRADAY: buy / sell through the day, not just at close
+                if DECIDE_EVERY_MIN > 0 and (time.time() - last_decide) >= DECIDE_EVERY_MIN * 60:
+                    do_decide(); last_decide = time.time()
+            # once-daily fallback (only when intraday is off) + the EOD report
+            if now.weekday() < 5 and now.strftime("%H:%M") >= DECIDE_AT_IST:
+                is_decide_day = DECIDE_DAILY or now.weekday() == DECIDE_WEEKDAY
+                if DECIDE_EVERY_MIN == 0 and is_decide_day and decided_on != now.date():
+                    do_decide(); decided_on = now.date()
+                if reported_on != now.date():
+                    do_report("EOD"); reported_on = now.date()
         except Exception as e:  # never let the loop die
             _log(f"cycle error: {e}")
         time.sleep(60)
