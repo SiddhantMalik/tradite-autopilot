@@ -88,7 +88,7 @@ class PaperBroker:
             self.day_start_nav = self.marked_nav()
 
     # ── orders ───────────────────────────────────────────────────────────────
-    def buy(self, symbol, qty, price, stop_pct, target_pct, sector, trail_pct=0):
+    def buy(self, symbol, qty, price, stop_pct, target_pct, sector, trail_pct=0, tp1_pct=0):
         cost = qty * price
         self.cash -= cost
         if symbol in self.positions:                      # average up
@@ -100,7 +100,8 @@ class PaperBroker:
         else:
             self.positions[symbol] = {
                 "qty": qty, "avg": round(price, 2),
-                "stop_pct": stop_pct, "target_pct": target_pct, "trail_pct": trail_pct,
+                "stop_pct": stop_pct, "target_pct": target_pct,
+                "trail_pct": trail_pct, "tp1_pct": tp1_pct, "scaled": False,
                 "stop": round(price * (1 - stop_pct / 100), 2),
                 "target": round(price * (1 + target_pct / 100), 2),
                 "high": round(price, 2),         # high-water mark for the trailing stop
@@ -135,6 +136,18 @@ class PaperBroker:
                 p["high"] = round(px, 2)
             if tp:
                 p["stop"] = max(p["stop"], round(p["high"] * (1 - tp / 100), 2))
+            # partial profit-take: book HALF at +tp1, let the rest ride the trailing stop
+            tp1 = p.get("tp1_pct", 0)
+            if tp1 and not p.get("scaled") and p["qty"] >= 2 and px >= p["avg"] * (1 + tp1 / 100):
+                half = p["qty"] // 2
+                pnl = (px - p["avg"]) * half
+                self.cash += half * px
+                self.realized_pnl += pnl
+                p["qty"] -= half
+                p["scaled"] = True
+                self.trades.append({"ts": _now(), "action": "SELL", "symbol": sym, "qty": half,
+                                    "price": round(px, 2), "pnl": round(pnl, 2), "reason": "PARTIAL-TP"})
+                exits.append({"symbol": sym, "reason": "PARTIAL profit (sold half)", "price": px, "pnl": pnl})
             if px <= p["stop"]:
                 trailed = p["stop"] >= p["avg"]              # stop above cost ⇒ a profitable trail
                 reason = "TRAIL (profit locked)" if trailed else "STOP-LOSS"

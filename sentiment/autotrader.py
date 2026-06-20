@@ -23,6 +23,7 @@ from .valuation import rank_by_value
 from .risk_gate import Limits
 from .trade_engine import TradeEngine, current_prices, DEFAULT_STOP_PCT, DEFAULT_TARGET_PCT
 from .news_adapter import news_signal
+from .market_filters import market_regime_ok, trend_ok, vol_weight
 
 # Default autonomous universe — liquid large-caps across sectors (override via env/config).
 AUTOTRADER_UNIVERSE = getattr(config, "AUTOTRADER_UNIVERSE", [
@@ -41,16 +42,19 @@ TARGET_NAMES = int(os.getenv("TRADITE_TARGET_NAMES", "8"))
 # drawdown, win-rate 29%→49%. The target is a far ceiling; the trailing stop is the real exit.
 TRAIL_PCT = float(os.getenv("TRADITE_TRAIL_PCT", "8"))
 TARGET_CEILING_PCT = float(os.getenv("TRADITE_TARGET_PCT", "50"))
+TP1_PCT = float(os.getenv("TRADITE_PARTIAL_TP_PCT", "15"))   # book half at +15%, trail the rest
 
 
 class AutoTrader:
     def __init__(self, universe=None, target_names=TARGET_NAMES,
-                 stop_pct=DEFAULT_STOP_PCT, target_pct=TARGET_CEILING_PCT, trail_pct=TRAIL_PCT):
+                 stop_pct=DEFAULT_STOP_PCT, target_pct=TARGET_CEILING_PCT,
+                 trail_pct=TRAIL_PCT, tp1_pct=TP1_PCT):
         self.universe = universe or AUTOTRADER_UNIVERSE
         self.target_names = target_names
         self.stop_pct = stop_pct
         self.target_pct = target_pct
         self.trail_pct = trail_pct
+        self.tp1_pct = tp1_pct
         self.engine = TradeEngine(limits=Limits())
         self.broker = self.engine.broker
         if self.broker.capital == 0:
@@ -86,32 +90,42 @@ class AutoTrader:
                     sells.append({"symbol": sym, "reason": reason,
                                   "price": prices[sym], "pnl": round(pnl, 2)})
 
-        # 2) BUY — value names not held, but VETO any with a bearish news catalyst
-        #    (don't buy into bad news even if cheap).
+        # 2) BUY — value names not held. ACTIVE by default: vol-targeted sizing + partial
+        #    profit-taking + trailing stop (these trade the MOST and returned the most in
+        #    backtest). News still vetoes a bearish name. The defensive cash-gates (market
+        #    regime, per-name trend) are OFF by default — they idle the book — but honored
+        #    if you enable them via env.
         orders, vetoed = [], []
-        for v in ranked:
-            if len(self.broker.positions) + len(orders) >= self.target_names:
-                break
-            sym = v["ticker"].replace(".NS", "")
-            if sym in self.broker.positions:
-                continue
-            if not v["verdict"].startswith(("WORTH BUYING", "FAIR")):
-                continue
-            ns = news(sym)
-            if ns.get("bearish"):
-                vetoed.append({"symbol": sym, "net": ns.get("net"),
-                               "reason": "NEWS_VETO:" + ",".join(ns.get("bear_tags") or ["negative"])})
-                continue
-            rupees = self.broker.marked_nav() / self.target_names
-            orders.append({"symbol": sym, "rupees": rupees,
-                           "stop_pct": self.stop_pct, "target_pct": self.target_pct,
-                           "trail_pct": self.trail_pct,
-                           "sector": v.get("sector", "Unknown")})
+        risk_on, regime_note = market_regime_ok()
+        base_slot = self.broker.marked_nav() / self.target_names
+        if risk_on:
+            for v in ranked:
+                if len(self.broker.positions) + len(orders) >= self.target_names:
+                    break
+                sym = v["ticker"].replace(".NS", "")
+                if sym in self.broker.positions:
+                    continue
+                if not v["verdict"].startswith(("WORTH BUYING", "FAIR")):
+                    continue
+                if not trend_ok(v["ticker"]):              # no-op unless TRADITE_USE_TREND=true
+                    vetoed.append({"symbol": sym, "reason": "TREND:below-200DMA"})
+                    continue
+                ns = news(sym)
+                if ns.get("bearish"):
+                    vetoed.append({"symbol": sym, "net": ns.get("net"),
+                                   "reason": "NEWS_VETO:" + ",".join(ns.get("bear_tags") or ["negative"])})
+                    continue
+                orders.append({"symbol": sym,
+                               "rupees": base_slot * vol_weight(v["ticker"]),  # vol-targeted size
+                               "stop_pct": self.stop_pct, "target_pct": self.target_pct,
+                               "trail_pct": self.trail_pct, "tp1_pct": self.tp1_pct,
+                               "sector": v.get("sector", "Unknown")})
 
         buys = self.engine.run_plan(orders, live=live) if orders else []
         news_summary = {s: {"net": d.get("net"), "tags": d.get("tags"),
                             "bearish": d.get("bearish"), "bullish": d.get("bullish")}
                         for s, d in _news.items() if d.get("ok")}
-        return {"sells": sells, "buys": buys, "vetoed": vetoed, "news": news_summary,
+        return {"sells": sells, "buys": buys, "vetoed": vetoed, "regime": regime_note,
+                "news": news_summary,
                 "summary": self.broker.summary(current_prices(list(self.broker.positions))
                                                if self.broker.positions else None)}

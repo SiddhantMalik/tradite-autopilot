@@ -97,6 +97,7 @@ class TradeEngine:
                 "stop_pct": float(o.get("stop_pct", DEFAULT_STOP_PCT)),
                 "target_pct": float(o.get("target_pct", DEFAULT_TARGET_PCT)),
                 "trail_pct": float(o.get("trail_pct", DEFAULT_TRAIL_PCT)),
+                "tp1_pct": float(o.get("tp1_pct", 0)),
                 "sector": o.get("sector", "Unknown"),
             }
             res = gate.check_order(order, self.broker)
@@ -106,7 +107,8 @@ class TradeEngine:
                     rec["live"] = self._live_buy(sym, res["qty"], price, order)
                 else:
                     self.broker.buy(sym, res["qty"], price, order["stop_pct"],
-                                    order["target_pct"], order["sector"], order["trail_pct"])
+                                    order["target_pct"], order["sector"],
+                                    order["trail_pct"], order["tp1_pct"])
                     trail = f", trail {order['trail_pct']:.0f}%" if order["trail_pct"] else ""
                     rec["filled"] = f"BUY {res['qty']}×{sym} @₹{price:,.2f} " \
                                     f"(stop −{order['stop_pct']:.0f}%{trail}, target +{order['target_pct']:.0f}%)"
