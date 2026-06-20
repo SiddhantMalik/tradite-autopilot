@@ -107,8 +107,9 @@ async function load(){
  const s=d.summary;
  document.getElementById('cards').innerHTML=[
   ['NAV',inr(s.nav)],['Cash',inr(s.cash)],['Positions',s.positions],
-  ['Total P&L',`<span class="${cls(s.total_pnl)}">${inr(s.total_pnl)} (${s.total_return_pct}%)</span>`],
-  ['Realized',`<span class="${cls(s.realized_pnl)}">${inr(s.realized_pnl)}</span>`],
+  ['Total P&L (net)',`<span class="${cls(s.total_pnl)}">${inr(s.total_pnl)} (${s.total_return_pct}%)</span>`],
+  ['Costs paid',`<span class="r">−${inr(s.total_costs||0)}</span>`],
+  ['Net after-tax',`<span class="${cls((s.net_after_tax||s.nav)-s.capital)}">${inr(s.net_after_tax||s.nav)} (${s.net_return_pct||s.total_return_pct}%)</span>`],
   ['Drawdown',`${s.drawdown_pct}%`],
  ].map(([l,v])=>`<div class="card"><div class="lab">${l}</div><div class="val">${v}</div></div>`).join('');
  document.getElementById('pos').innerHTML=tbl(['Symbol','Sector','Qty','Avg','LTP','Stop','Target','P&L','%'],

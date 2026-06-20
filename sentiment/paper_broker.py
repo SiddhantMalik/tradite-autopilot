@@ -18,6 +18,7 @@ import json
 from datetime import datetime, timezone
 
 import config
+from .costs import trade_cost, stcg
 
 BOOK_PATH = config.DATA_DIR / "paper_book.json"
 
@@ -45,6 +46,7 @@ class PaperBroker:
         self.day_start_nav = d.get("day_start_nav", self.capital)
         self.last_nav = d.get("last_nav", None)
         self.realized_pnl = d.get("realized_pnl", 0.0)
+        self.total_costs = d.get("total_costs", 0.0)
         self.positions = d.get("positions", {})
         self.trades = d.get("trades", [])
 
@@ -52,13 +54,14 @@ class PaperBroker:
         json.dump({
             "capital": self.capital, "cash": self.cash, "peak_nav": self.peak_nav,
             "day": self.day, "day_start_nav": self.day_start_nav, "last_nav": self.last_nav,
-            "realized_pnl": self.realized_pnl, "positions": self.positions, "trades": self.trades,
+            "realized_pnl": self.realized_pnl, "total_costs": self.total_costs,
+            "positions": self.positions, "trades": self.trades,
         }, open(self.path, "w"), indent=2, default=str)
 
     def init(self, capital: float):
         self.capital = self.cash = float(capital)
         self.peak_nav = self.day_start_nav = self.last_nav = float(capital)
-        self.day = _today(); self.realized_pnl = 0.0
+        self.day = _today(); self.realized_pnl = 0.0; self.total_costs = 0.0
         self.positions = {}; self.trades = []
         self._save()
 
@@ -90,7 +93,9 @@ class PaperBroker:
     # ── orders ───────────────────────────────────────────────────────────────
     def buy(self, symbol, qty, price, stop_pct, target_pct, sector, trail_pct=0, tp1_pct=0):
         cost = qty * price
-        self.cash -= cost
+        fee = trade_cost(cost)
+        self.cash -= cost + fee
+        self.total_costs += fee
         if symbol in self.positions:                      # average up
             p = self.positions[symbol]; tot = p["qty"] + qty
             p["avg"] = (p["qty"] * p["avg"] + cost) / tot; p["qty"] = tot
@@ -113,9 +118,12 @@ class PaperBroker:
 
     def sell(self, symbol, price, reason) -> float:
         p = self.positions.pop(symbol)
+        proceeds = p["qty"] * price
+        fee = trade_cost(proceeds)
         pnl = (price - p["avg"]) * p["qty"]
-        self.cash += p["qty"] * price
+        self.cash += proceeds - fee
         self.realized_pnl += pnl
+        self.total_costs += fee
         self.trades.append({"ts": _now(), "action": "SELL", "symbol": symbol,
                             "qty": p["qty"], "price": round(price, 2),
                             "pnl": round(pnl, 2), "reason": reason})
@@ -140,9 +148,10 @@ class PaperBroker:
             tp1 = p.get("tp1_pct", 0)
             if tp1 and not p.get("scaled") and p["qty"] >= 2 and px >= p["avg"] * (1 + tp1 / 100):
                 half = p["qty"] // 2
+                proceeds = half * px; fee = trade_cost(proceeds)
                 pnl = (px - p["avg"]) * half
-                self.cash += half * px
-                self.realized_pnl += pnl
+                self.cash += proceeds - fee
+                self.realized_pnl += pnl; self.total_costs += fee
                 p["qty"] -= half
                 p["scaled"] = True
                 self.trades.append({"ts": _now(), "action": "SELL", "symbol": sym, "qty": half,
@@ -165,13 +174,19 @@ class PaperBroker:
         nav = self.marked_nav(prices)
         unreal = sum((prices or {}).get(s, p["avg"]) * p["qty"] - p["avg"] * p["qty"]
                      for s, p in self.positions.items()) if prices else 0.0
+        est_tax = stcg(self.realized_pnl - self.total_costs)   # STCG on net realised gains
+        net_pnl = nav - self.capital                           # true P&L — costs already in NAV
         return {
             "capital": self.capital, "cash": round(self.cash, 2),
             "positions": len(self.positions), "nav": round(nav, 2),
             "realized_pnl": round(self.realized_pnl, 2),
             "unrealized_pnl": round(unreal, 2),
-            "total_pnl": round(self.realized_pnl + unreal, 2),
+            "total_pnl": round(net_pnl, 2),
             "total_return_pct": round((nav / self.capital - 1) * 100, 2) if self.capital else 0.0,
+            "total_costs": round(self.total_costs, 2),
+            "est_tax": round(est_tax, 2),
+            "net_after_tax": round(nav - est_tax, 2),
+            "net_return_pct": round(((nav - est_tax) / self.capital - 1) * 100, 2) if self.capital else 0.0,
             "peak_nav": round(self.peak_nav, 2),
             "drawdown_pct": round((nav / self.peak_nav - 1) * 100, 2) if self.peak_nav else 0.0,
         }
