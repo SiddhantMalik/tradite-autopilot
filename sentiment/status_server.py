@@ -64,6 +64,24 @@ def healthz():
     return {"ok": True}
 
 
+@app.get("/api/universe")
+def api_universe():
+    """Selectable stock list for the dropdown (Nifty 500 if reachable, else Nifty 100)."""
+    names = []
+    try:
+        from .screener import _load_nifty500
+        names = sorted({t.replace(".NS", "") for t in _load_nifty500()})
+    except Exception:  # noqa: BLE001
+        names = []
+    if not names:
+        try:
+            from .screener import _nifty100_fallback
+            names = sorted({t.replace(".NS", "") for t in _nifty100_fallback()})
+        except Exception:  # noqa: BLE001
+            names = ["TCS", "INFY", "RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "ITC"]
+    return JSONResponse({"symbols": names})
+
+
 @app.get("/api/analyze")
 def api_analyze(symbol: str = ""):
     """On-demand analysis of ANY NSE symbol: valuation verdict + measured base rate + news."""
@@ -131,9 +149,10 @@ _HTML = """<!doctype html><html><head><meta charset="utf-8">
 <header><h1>📈 Tradite Autopilot</h1><span class="mode" id="mode">PAPER</span></header>
 <div class="wrap">
  <div style="display:flex;gap:8px;margin-bottom:16px">
-  <input id="q" placeholder="Search any NSE stock for analysis — e.g. TCS, RELIANCE, SBIN"
-   onkeydown="if(event.key==='Enter')analyze()"
+  <select id="q" onchange="analyze()"
    style="flex:1;background:var(--panel);border:1px solid var(--ln);color:var(--tx);padding:10px 12px;border-radius:8px;font-size:14px">
+   <option value="">Select a stock to analyze…</option>
+  </select>
   <button onclick="analyze()" style="background:var(--acc);color:#04101f;border:0;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer">Analyze</button>
  </div>
  <div id="ares"></div>
@@ -198,5 +217,10 @@ async function analyze(){
    ${(ns.top||[]).map(h=>`<div class="mut" style="font-size:12px">• [${h.score>0?'+':''}${h.score}] ${h.title}</div>`).join('')}
  </div>`;
 }
-load(); setInterval(load,30000);
+async function loadUniverse(){
+ try{ const d=await (await fetch('/api/universe')).json(); const sel=document.getElementById('q');
+   (d.symbols||[]).forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o);});
+ }catch(e){}
+}
+loadUniverse(); load(); setInterval(load,30000);
 </script></body></html>"""
