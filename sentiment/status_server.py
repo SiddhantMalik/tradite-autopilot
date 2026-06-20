@@ -66,20 +66,31 @@ def healthz():
 
 @app.get("/api/universe")
 def api_universe():
-    """Selectable stock list for the dropdown (Nifty 500 if reachable, else Nifty 100)."""
-    names = []
+    """Searchable stock list: [{s: symbol, n: company name}] from the Nifty 500 (with names)."""
+    stocks = []
     try:
-        from .screener import _load_nifty500
-        names = sorted({t.replace(".NS", "") for t in _load_nifty500()})
+        import pandas as pd
+        import sentiment.screener as S
+        S._load_nifty500()                              # ensure the CSV cache exists
+        df = pd.read_csv(S.NIFTY500_CACHE)
+        symcol = next((c for c in df.columns if c.strip().lower() == "symbol"), None)
+        namecol = next((c for c in df.columns if "name" in c.strip().lower()), None)
+        for _, r in df.iterrows():
+            sym = str(r.get(symcol, "")).strip()
+            nm = str(r.get(namecol, "")).strip() if namecol else sym
+            if sym and sym.lower() != "nan":
+                stocks.append({"s": sym, "n": nm or sym})
     except Exception:  # noqa: BLE001
-        names = []
-    if not names:
+        stocks = []
+    if not stocks:
         try:
             from .screener import _nifty100_fallback
-            names = sorted({t.replace(".NS", "") for t in _nifty100_fallback()})
+            stocks = [{"s": t.replace(".NS", ""), "n": t.replace(".NS", "")}
+                      for t in _nifty100_fallback()]
         except Exception:  # noqa: BLE001
-            names = ["TCS", "INFY", "RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "ITC"]
-    return JSONResponse({"symbols": names})
+            stocks = [{"s": x, "n": x} for x in ["TCS", "INFY", "RELIANCE", "HDFCBANK", "SBIN", "ITC"]]
+    stocks.sort(key=lambda x: x["s"])
+    return JSONResponse({"stocks": stocks})
 
 
 @app.get("/api/analyze")
@@ -149,10 +160,13 @@ _HTML = """<!doctype html><html><head><meta charset="utf-8">
 <header><h1>📈 Tradite Autopilot</h1><span class="mode" id="mode">PAPER</span></header>
 <div class="wrap">
  <div style="display:flex;gap:8px;margin-bottom:16px">
-  <select id="q" onchange="analyze()"
-   style="flex:1;background:var(--panel);border:1px solid var(--ln);color:var(--tx);padding:10px 12px;border-radius:8px;font-size:14px">
-   <option value="">Select a stock to analyze…</option>
-  </select>
+  <div style="position:relative;flex:1">
+   <input id="q" autocomplete="off" placeholder="Search by company name or symbol — e.g. Infosys, TCS, Tata, HDFC"
+     oninput="filterStocks()" onfocus="filterStocks()"
+     onblur="setTimeout(function(){document.getElementById('qlist').style.display='none'},200)"
+     style="width:100%;box-sizing:border-box;background:var(--panel);border:1px solid var(--ln);color:var(--tx);padding:10px 12px;border-radius:8px;font-size:14px">
+   <div id="qlist" style="position:absolute;z-index:20;left:0;right:0;top:46px;background:var(--panel);border:1px solid var(--ln);border-radius:8px;max-height:300px;overflow:auto;display:none"></div>
+  </div>
   <button onclick="analyze()" style="background:var(--acc);color:#04101f;border:0;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer">Analyze</button>
  </div>
  <div id="ares"></div>
@@ -195,7 +209,11 @@ function empty(){return '<div class="card mut">none</div>';}
 function f1(x){return (typeof x==='number'&&isFinite(x))?x.toFixed(1):'n/a';}
 function pc(x){return (typeof x==='number')?Math.round(x*100)+'%':'n/a';}
 async function analyze(){
- const sym=document.getElementById('q').value.trim(); if(!sym)return;
+ let sym=document.getElementById('q').value.trim(); if(!sym)return;
+ const u=sym.toUpperCase();
+ if(STOCKS.some(x=>x.s===u)){ sym=u; }
+ else { const m=STOCKS.filter(x=>x.s.toLowerCase().includes(sym.toLowerCase())||x.n.toLowerCase().includes(sym.toLowerCase())); if(m.length) sym=m[0].s; }
+ document.getElementById('q').value=sym;
  const el=document.getElementById('ares');
  el.innerHTML=`<div class="card mut">Analyzing ${sym.toUpperCase()} … (valuation + base rate + news, ~10-15s)</div>`;
  let d; try{ d=await (await fetch('/api/analyze?symbol='+encodeURIComponent(sym))).json(); }
@@ -217,10 +235,17 @@ async function analyze(){
    ${(ns.top||[]).map(h=>`<div class="mut" style="font-size:12px">• [${h.score>0?'+':''}${h.score}] ${h.title}</div>`).join('')}
  </div>`;
 }
-async function loadUniverse(){
- try{ const d=await (await fetch('/api/universe')).json(); const sel=document.getElementById('q');
-   (d.symbols||[]).forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o);});
- }catch(e){}
+let STOCKS=[];
+async function loadUniverse(){ try{ const d=await (await fetch('/api/universe')).json(); STOCKS=d.stocks||[]; }catch(e){} }
+function esc(s){return (s||'').replace(/[<>'"]/g,'');}
+function filterStocks(){
+ const q=document.getElementById('q').value.trim().toLowerCase(); const box=document.getElementById('qlist');
+ if(!q){box.style.display='none';return;}
+ const m=STOCKS.filter(x=>x.s.toLowerCase().includes(q)||x.n.toLowerCase().includes(q)).slice(0,25);
+ if(!m.length){box.style.display='none';return;}
+ box.innerHTML=m.map(x=>`<div onmousedown="pick('${x.s}')" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--ln)"><b>${x.s}</b> <span class="mut" style="font-size:12px">${esc(x.n)}</span></div>`).join('');
+ box.style.display='block';
 }
+function pick(s){ document.getElementById('q').value=s; document.getElementById('qlist').style.display='none'; analyze(); }
 loadUniverse(); load(); setInterval(load,30000);
 </script></body></html>"""
