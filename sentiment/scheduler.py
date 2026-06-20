@@ -41,7 +41,7 @@ DECIDE_DAILY = os.getenv("TRADITE_DECIDE_DAILY", "true").lower() == "true"
 DECIDE_WEEKDAY = int(os.getenv("TRADITE_DECIDE_WEEKDAY", "0"))   # 0=Mon .. 4=Fri
 # INTRADAY decisions: re-decide (new buys + news/verdict sells) every N minutes during market
 # hours, so it acts through the day — not just once at close. 0 = once daily at DECIDE_AT.
-DECIDE_EVERY_MIN = int(os.getenv("TRADITE_DECIDE_EVERY_MIN", "60"))
+DECIDE_EVERY_MIN = int(os.getenv("TRADITE_DECIDE_EVERY_MIN", "30"))
 
 
 def _ist_now() -> datetime:
