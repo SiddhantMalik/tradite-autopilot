@@ -58,11 +58,13 @@ def do_monitor() -> dict:
 
 
 def do_decide() -> dict:
-    _log(f"DECIDE ({'LIVE' if _LIVE else 'paper'}) — value-ranking universe …")
+    _log(f"DECIDE ({'LIVE' if _LIVE else 'paper'}) — value + news …")
     res = AutoTrader().decide(live=_LIVE)
-    for s in res["sells"]:
-        _log(f"SELL(discipline) {s['symbol']} [{s['verdict']}] @₹{s['price']:,.1f} P&L ₹{s['pnl']:+,.0f}")
-    for b in res["buys"]:
+    for s in res.get("sells", []):
+        _log(f"SELL {s['symbol']} [{s['reason']}] @₹{s['price']:,.1f} P&L ₹{s['pnl']:+,.0f}")
+    for v in res.get("vetoed", []):
+        _log(f"VETO (skip buy) {v['symbol']} [{v['reason']}]")
+    for b in res.get("buys", []):
         tag = b.get("filled") or f"{b.get('decision','?').upper()}: {'; '.join(b.get('reasons', []))}"
         _log(f"BUY {b.get('symbol','?')}: {tag}")
     return res

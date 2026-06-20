@@ -5,6 +5,7 @@ yfinance
 scikit-learn
 pydantic
 python-dotenv
+feedparser
 fastapi
 uvicorn[standard]
 # For LIVE trading later, also: kiteconnect

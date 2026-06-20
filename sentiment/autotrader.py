@@ -22,6 +22,7 @@ import config
 from .valuation import rank_by_value
 from .risk_gate import Limits
 from .trade_engine import TradeEngine, current_prices, DEFAULT_STOP_PCT, DEFAULT_TARGET_PCT
+from .news_adapter import news_signal
 
 # Default autonomous universe — liquid large-caps across sectors (override via env/config).
 AUTOTRADER_UNIVERSE = getattr(config, "AUTOTRADER_UNIVERSE", [
@@ -54,19 +55,34 @@ class AutoTrader:
         verdict = {v["ticker"].replace(".NS", ""): v for v in ranked}
         held = set(self.broker.positions)
 
-        # 1) SELL DISCIPLINE — exit holds whose verdict decayed to AVOID / HOLD-WAIT
+        _news: dict[str, dict] = {}
+        def news(sym):                                   # fetch once per name per cycle
+            if sym not in _news:
+                _news[sym] = news_signal(sym + ".NS")
+            return _news[sym]
+
+        # 1) SELL — event-driven (bearish NEWS) OR verdict decayed to AVOID/HOLD-WAIT.
+        #    News adaptation: a regulatory/fraud/earnings-miss catalyst exits the name now,
+        #    regardless of valuation, before the stop would.
         sells = []
         if held:
             prices = current_prices(list(held))
             for sym in list(held):
                 v = verdict.get(sym)
-                if v and v["verdict"].startswith(("AVOID", "HOLD")) and prices.get(sym):
-                    pnl = self.broker.sell(sym, prices[sym], "VERDICT_DOWNGRADE")
-                    sells.append({"symbol": sym, "verdict": v["verdict"],
+                ns = news(sym)
+                reason = None
+                if ns.get("bearish"):
+                    reason = "NEWS:" + ",".join(ns.get("bear_tags") or ["negative"])
+                elif v and v["verdict"].startswith(("AVOID", "HOLD")):
+                    reason = "VERDICT_DOWNGRADE"
+                if reason and prices.get(sym):
+                    pnl = self.broker.sell(sym, prices[sym], reason)
+                    sells.append({"symbol": sym, "reason": reason,
                                   "price": prices[sym], "pnl": round(pnl, 2)})
 
-        # 2) BUY — top WORTH-BUYING / FAIR names not held, equal-weight, risk-gated
-        orders = []
+        # 2) BUY — value names not held, but VETO any with a bearish news catalyst
+        #    (don't buy into bad news even if cheap).
+        orders, vetoed = [], []
         for v in ranked:
             if len(self.broker.positions) + len(orders) >= self.target_names:
                 break
@@ -75,12 +91,20 @@ class AutoTrader:
                 continue
             if not v["verdict"].startswith(("WORTH BUYING", "FAIR")):
                 continue
+            ns = news(sym)
+            if ns.get("bearish"):
+                vetoed.append({"symbol": sym, "net": ns.get("net"),
+                               "reason": "NEWS_VETO:" + ",".join(ns.get("bear_tags") or ["negative"])})
+                continue
             rupees = self.broker.marked_nav() / self.target_names
             orders.append({"symbol": sym, "rupees": rupees,
                            "stop_pct": self.stop_pct, "target_pct": self.target_pct,
                            "sector": v.get("sector", "Unknown")})
 
         buys = self.engine.run_plan(orders, live=live) if orders else []
-        return {"sells": sells, "buys": buys,
+        news_summary = {s: {"net": d.get("net"), "tags": d.get("tags"),
+                            "bearish": d.get("bearish"), "bullish": d.get("bullish")}
+                        for s, d in _news.items() if d.get("ok")}
+        return {"sells": sells, "buys": buys, "vetoed": vetoed, "news": news_summary,
                 "summary": self.broker.summary(current_prices(list(self.broker.positions))
                                                if self.broker.positions else None)}

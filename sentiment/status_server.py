@@ -116,10 +116,11 @@ async function load(){
    `<span class="${cls(p.pnl)}">${inr(p.pnl)}</span>`,`<span class="${cls(p.pnl)}">${p.pnl_pct}%</span>`])) || empty();
  document.getElementById('ord').innerHTML=tbl(['Symbol','Side','Type','Trigger','Qty','Status'],
   d.orders.map(o=>[o.symbol,o.side,`<span class="pill">${o.type}</span>`,inr(o.trigger),o.qty,o.status])) || empty();
- document.getElementById('trd').innerHTML=tbl(['Time','Action','Symbol','Qty','Price','P&L'],
+ document.getElementById('trd').innerHTML=tbl(['Time','Action','Symbol','Qty','Price','P&L','Why'],
   d.trades.map(t=>[t.ts?t.ts.slice(0,16).replace('T',' '):'',
    `<span class="${t.action=='BUY'?'g':'r'}">${t.action}</span>`,t.symbol,t.qty,inr(t.price),
-   t.pnl!=null?`<span class="${cls(t.pnl)}">${inr(t.pnl)}</span>`:'—'])) || empty();
+   t.pnl!=null?`<span class="${cls(t.pnl)}">${inr(t.pnl)}</span>`:'—',
+   `<span class="mut">${t.reason||'—'}</span>`])) || empty();
  document.getElementById('foot').textContent='updated '+new Date().toLocaleTimeString()+' · auto-refresh 30s · paper (no live orders)';
 }
 function tbl(h,rows){ if(!rows.length) return '';
