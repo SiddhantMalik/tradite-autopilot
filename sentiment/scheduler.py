@@ -35,9 +35,9 @@ DECIDE_AT_IST = os.getenv("TRADITE_DECIDE_AT", "15:45")     # HH:MM IST
 REPORTS_DIR = config.ROOT / "reports"
 _IST = timedelta(hours=5, minutes=30)
 _LIVE = os.getenv("TRADITE_AUTOPILOT_LIVE") == "I_UNDERSTAND"
-# Decide WEEKLY (default Monday) to cut turnover/costs; exits are still monitored every 30 min.
-# Set TRADITE_DECIDE_DAILY=true for the old daily cadence.
-DECIDE_DAILY = os.getenv("TRADITE_DECIDE_DAILY", "false").lower() == "true"
+# DAILY decide by default (more active — Sid's preference). Set TRADITE_DECIDE_DAILY=false
+# (with TRADITE_DECIDE_WEEKDAY) to switch to a lower-turnover weekly cadence instead.
+DECIDE_DAILY = os.getenv("TRADITE_DECIDE_DAILY", "true").lower() == "true"
 DECIDE_WEEKDAY = int(os.getenv("TRADITE_DECIDE_WEEKDAY", "0"))   # 0=Mon .. 4=Fri
 
 

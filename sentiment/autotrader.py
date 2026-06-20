@@ -26,9 +26,10 @@ from .news_adapter import news_signal
 from .market_filters import market_regime_ok, trend_ok, vol_weight, liquidity_cap
 from .critic import review as critic_review
 
-# turnover control
-MIN_HOLD_DAYS = int(os.getenv("TRADITE_MIN_HOLD_DAYS", "10"))   # don't discretionary-sell a fresh buy
-TOPUP_BELOW = float(os.getenv("TRADITE_TOPUP_BELOW", "0.90"))   # only scale-in while < 90% of target
+# Turnover knobs — DEFAULT OFF (Sid prefers the more active book). Raise MIN_HOLD_DAYS or lower
+# TOPUP_BELOW via env to dampen turnover later if costs bite.
+MIN_HOLD_DAYS = int(os.getenv("TRADITE_MIN_HOLD_DAYS", "0"))    # 0 = sell on verdict immediately
+TOPUP_BELOW = float(os.getenv("TRADITE_TOPUP_BELOW", "0.95"))   # scale-in until ~full target
 
 
 def _days_held(pos: dict) -> int:
