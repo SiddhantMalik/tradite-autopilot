@@ -35,6 +35,10 @@ DECIDE_AT_IST = os.getenv("TRADITE_DECIDE_AT", "15:45")     # HH:MM IST
 REPORTS_DIR = config.ROOT / "reports"
 _IST = timedelta(hours=5, minutes=30)
 _LIVE = os.getenv("TRADITE_AUTOPILOT_LIVE") == "I_UNDERSTAND"
+# Decide WEEKLY (default Monday) to cut turnover/costs; exits are still monitored every 30 min.
+# Set TRADITE_DECIDE_DAILY=true for the old daily cadence.
+DECIDE_DAILY = os.getenv("TRADITE_DECIDE_DAILY", "false").lower() == "true"
+DECIDE_WEEKDAY = int(os.getenv("TRADITE_DECIDE_WEEKDAY", "0"))   # 0=Mon .. 4=Fri
 
 
 def _ist_now() -> datetime:
@@ -67,6 +71,8 @@ def do_decide() -> dict:
     for b in res.get("buys", []):
         tag = b.get("filled") or f"{b.get('decision','?').upper()}: {'; '.join(b.get('reasons', []))}"
         _log(f"BUY {b.get('symbol','?')}: {tag}")
+    if res.get("audit"):
+        _log("CRITIC audit: " + " | ".join(res["audit"]))
     return res
 
 
@@ -119,7 +125,8 @@ def run_loop():
         try:
             if _in_market_hours() and (time.time() - last_monitor) >= MONITOR_EVERY_MIN * 60:
                 do_monitor(); last_monitor = time.time()
-            if now.weekday() < 5 and now.strftime("%H:%M") >= DECIDE_AT_IST and decided_on != now.date():
+            is_decide_day = now.weekday() < 5 and (DECIDE_DAILY or now.weekday() == DECIDE_WEEKDAY)
+            if is_decide_day and now.strftime("%H:%M") >= DECIDE_AT_IST and decided_on != now.date():
                 do_decide(); decided_on = now.date()
             if now.weekday() < 5 and now.strftime("%H:%M") >= DECIDE_AT_IST and reported_on != now.date():
                 do_report("EOD"); reported_on = now.date()

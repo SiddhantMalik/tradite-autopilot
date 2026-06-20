@@ -42,6 +42,7 @@ def _snapshot() -> dict:
         positions.append({
             "symbol": sym, "qty": p["qty"], "avg": round(p["avg"], 2), "ltp": round(ltp, 2),
             "stop": p["stop"], "target": p["target"], "sector": p.get("sector", ""),
+            "value": round(ltp * p["qty"], 2),
             "pnl": round(pnl, 2), "pnl_pct": round((ltp / p["avg"] - 1) * 100, 2),
         })
         orders.append({"symbol": sym, "side": "SELL", "type": "STOP-LOSS",
@@ -106,14 +107,14 @@ async function load(){
  document.getElementById('mode').textContent=d.mode;
  const s=d.summary;
  document.getElementById('cards').innerHTML=[
-  ['NAV',inr(s.nav)],['Cash',inr(s.cash)],['Positions',s.positions],
+  ['NAV',inr(s.nav)],['Holdings value',inr(s.nav-s.cash)],['Cash',inr(s.cash)],['Positions',s.positions],
   ['Total P&L (net)',`<span class="${cls(s.total_pnl)}">${inr(s.total_pnl)} (${s.total_return_pct}%)</span>`],
   ['Costs paid',`<span class="r">−${inr(s.total_costs||0)}</span>`],
   ['Net after-tax',`<span class="${cls((s.net_after_tax||s.nav)-s.capital)}">${inr(s.net_after_tax||s.nav)} (${s.net_return_pct||s.total_return_pct}%)</span>`],
   ['Drawdown',`${s.drawdown_pct}%`],
  ].map(([l,v])=>`<div class="card"><div class="lab">${l}</div><div class="val">${v}</div></div>`).join('');
- document.getElementById('pos').innerHTML=tbl(['Symbol','Sector','Qty','Avg','LTP','Stop','Target','P&L','%'],
-  d.positions.map(p=>[p.symbol,`<span class="mut">${p.sector}</span>`,p.qty,inr(p.avg),inr(p.ltp),inr(p.stop),inr(p.target),
+ document.getElementById('pos').innerHTML=tbl(['Symbol','Sector','Qty','Avg','LTP','Value','Stop','Target','P&L','%'],
+  d.positions.map(p=>[p.symbol,`<span class="mut">${p.sector}</span>`,p.qty,inr(p.avg),inr(p.ltp),inr(p.value),inr(p.stop),inr(p.target),
    `<span class="${cls(p.pnl)}">${inr(p.pnl)}</span>`,`<span class="${cls(p.pnl)}">${p.pnl_pct}%</span>`])) || empty();
  document.getElementById('ord').innerHTML=tbl(['Symbol','Side','Type','Trigger','Qty','Status'],
   d.orders.map(o=>[o.symbol,o.side,`<span class="pill">${o.type}</span>`,inr(o.trigger),o.qty,o.status])) || empty();

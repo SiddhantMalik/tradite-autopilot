@@ -58,3 +58,32 @@ def vol_weight(ticker: str) -> float:
     if v <= 0:
         return 1.0
     return min(max(REF_VOL / v, 0.6), 1.6)
+
+
+# ── liquidity / ADV cap ──────────────────────────────────────────────────────
+MAX_ADV_PCT = float(os.getenv("TRADITE_MAX_ADV_PCT", "0.05"))   # ≤5% of avg daily traded value
+_adv_cache: dict[str, float] = {}
+
+
+def adv_value(ticker: str, days: int = 20) -> float:
+    """Average daily TRADED VALUE (₹) over ~`days` sessions — for the liquidity cap.
+    0.0 if unknown (then no cap is applied). Cached per process run."""
+    if ticker in _adv_cache:
+        return _adv_cache[ticker]
+    val = 0.0
+    try:
+        import yfinance as yf
+        h = yf.Ticker(ticker).history(period="2mo")
+        if h is not None and not h.empty and "Volume" in h and "Close" in h:
+            val = float((h["Close"] * h["Volume"]).tail(days).mean())
+    except Exception:  # noqa: BLE001
+        val = 0.0
+    _adv_cache[ticker] = val
+    return val
+
+
+def liquidity_cap(ticker: str) -> float:
+    """Max ₹ for a single position so we never try to take more than MAX_ADV_PCT of the
+    stock's daily traded value (a fill we couldn't realistically get). inf if ADV unknown."""
+    adv = adv_value(ticker)
+    return adv * MAX_ADV_PCT if adv > 0 else float("inf")

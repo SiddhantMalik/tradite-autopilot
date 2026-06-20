@@ -23,7 +23,21 @@ from .valuation import rank_by_value
 from .risk_gate import Limits
 from .trade_engine import TradeEngine, current_prices, DEFAULT_STOP_PCT, DEFAULT_TARGET_PCT
 from .news_adapter import news_signal
-from .market_filters import market_regime_ok, trend_ok, vol_weight
+from .market_filters import market_regime_ok, trend_ok, vol_weight, liquidity_cap
+from .critic import review as critic_review
+
+# turnover control
+MIN_HOLD_DAYS = int(os.getenv("TRADITE_MIN_HOLD_DAYS", "10"))   # don't discretionary-sell a fresh buy
+TOPUP_BELOW = float(os.getenv("TRADITE_TOPUP_BELOW", "0.90"))   # only scale-in while < 90% of target
+
+
+def _days_held(pos: dict) -> int:
+    from datetime import date
+    try:
+        y, m, d = (int(x) for x in str(pos.get("entry_date", "")).split("-"))
+        return (date.today() - date(y, m, d)).days
+    except Exception:
+        return 999
 
 # Default autonomous universe — liquid large-caps across sectors (override via env/config).
 AUTOTRADER_UNIVERSE = getattr(config, "AUTOTRADER_UNIVERSE", [
@@ -87,8 +101,9 @@ class AutoTrader:
                 reason = None
                 if ns.get("bearish"):
                     reason = "NEWS:" + ",".join(ns.get("bear_tags") or ["negative"])
-                elif v and v["verdict"].startswith(("AVOID", "HOLD")):
-                    reason = "VERDICT_DOWNGRADE"
+                elif (v and v["verdict"].startswith(("AVOID", "HOLD"))
+                      and _days_held(self.broker.positions.get(sym, {})) >= MIN_HOLD_DAYS):
+                    reason = "VERDICT_DOWNGRADE"     # discretionary sell only after min-hold
                 if reason and prices.get(sym):
                     pnl = self.broker.sell(sym, prices[sym], reason)
                     sells.append({"symbol": sym, "reason": reason,
@@ -123,11 +138,12 @@ class AutoTrader:
                     continue                               # at the name cap; don't open a new one
                 # STAGGERED SCALE-IN: fill toward a vol-targeted target over STAGGER_TRANCHES days,
                 # and top up held names that are below their target weight.
-                target_rupees = base_slot * vol_weight(v["ticker"])
+                # vol-targeted size, capped by liquidity (≤% of avg daily traded value)
+                target_rupees = min(base_slot * vol_weight(v["ticker"]), liquidity_cap(v["ticker"]))
                 cur_val = (self.broker.positions[sym]["qty"] *
                            prices.get(sym, self.broker.positions[sym]["avg"])) if held_here else 0.0
-                if cur_val >= target_rupees * 0.95:
-                    continue                               # already at full target weight
+                if cur_val >= target_rupees * TOPUP_BELOW:
+                    continue                               # no-trade band: close enough to target
                 add = min(target_rupees / STAGGER_TRANCHES, target_rupees - cur_val)
                 if not held_here:
                     new_names += 1
@@ -136,11 +152,18 @@ class AutoTrader:
                                "trail_pct": self.trail_pct, "tp1_pct": self.tp1_pct,
                                "sector": v.get("sector", "Unknown")})
 
+        # SELF-REFLECTION CRITIC — holistic audit of the whole plan before anything executes.
+        crit = critic_review(orders, self.broker, {s["symbol"] for s in sells},
+                             _news, self.engine.limits.min_cash_pct)
+        orders = crit["approved"]
+        for x in crit["vetoes"]:
+            vetoed.append({"symbol": x["symbol"], "reason": "CRITIC:" + "; ".join(x["reasons"])})
+
         buys = self.engine.run_plan(orders, live=live) if orders else []
         news_summary = {s: {"net": d.get("net"), "tags": d.get("tags"),
                             "bearish": d.get("bearish"), "bullish": d.get("bullish")}
                         for s, d in _news.items() if d.get("ok")}
         return {"sells": sells, "buys": buys, "vetoed": vetoed, "regime": regime_note,
-                "news": news_summary,
+                "audit": crit["audit"], "news": news_summary,
                 "summary": self.broker.summary(current_prices(list(self.broker.positions))
                                                if self.broker.positions else None)}
