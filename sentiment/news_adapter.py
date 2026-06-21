@@ -23,6 +23,40 @@ USE_NEWS = os.getenv("TRADITE_USE_NEWS", "true").lower() != "false"
 BEARISH_TAGS = {"legal_regulatory", "earnings_miss", "guidance_cut", "promoter_sell", "pledging"}
 BULLISH_TAGS = {"earnings_beat", "deal_win", "guidance_raise", "buyback", "bonus_issue"}
 
+# LEARNED (news_learn.py): ~80% of entity-tagged items are market/sector commentary that carries
+# no idiosyncratic forward effect (positive & negative market tone gave the same ~+0.6%/20d).
+# Only COMPANY-SPECIFIC news (title names the company) moves the single stock. So we weight the
+# per-stock signal by scope: company 1.0, sector/other 0.35, pure index commentary 0.0.
+_COMPANY_KW = {
+    "RELIANCE": ["reliance", "jio", "ril", "ambani"], "HDFCBANK": ["hdfc"],
+    "INFY": ["infosys", "infy"], "TCS": ["tcs", "tata consultancy"], "WIPRO": ["wipro"],
+    "HCLTECH": ["hcl"], "TECHM": ["tech mahindra"], "TRENT": ["trent"],
+    "VEDL": ["vedanta", "hindustan zinc"], "HINDUNILVR": ["hindustan unilever", "hul", "unilever"],
+    "ICICIBANK": ["icici"], "LT": ["larsen", "l&t", "l and t"], "COALINDIA": ["coal india"],
+    "ADANIENT": ["adani enterprises", "adani"], "MARUTI": ["maruti", "suzuki"],
+    "SBIN": ["sbi", "state bank"], "AXISBANK": ["axis bank"], "ITC": ["itc"],
+    "BHARTIARTL": ["bharti", "airtel"], "CIPLA": ["cipla"], "MAHABANK": ["maharashtra"],
+    "KOTAKBANK": ["kotak"], "BAJFINANCE": ["bajaj fin"], "M&M": ["mahindra"],
+    "SUNPHARMA": ["sun pharma"], "TITAN": ["titan"], "NESTLEIND": ["nestle"],
+}
+_MARKET_WORDS = ("sensex", "nifty", "dalal street", "d-street", "benchmark index",
+                 "market today", "stock market", "share market", "gift nifty")
+
+
+def _scope(symbol: str, title: str) -> str:
+    """company | sector | market — how stock-specific this headline is."""
+    t = (title or "").lower()
+    sym = symbol.replace(".NS", "").upper()
+    kws = _COMPANY_KW.get(sym, [sym.lower()])
+    if any(k in t for k in kws):
+        return "company"
+    if any(w in t for w in _MARKET_WORDS):
+        return "market"
+    return "sector"
+
+
+_SCOPE_W = {"company": 1.0, "sector": 0.35, "market": 0.0}
+
 _scorer = None
 
 
@@ -66,8 +100,12 @@ def news_signal(ticker: str, max_items: int = 8, days: int = 14) -> dict:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     sc = _get_scorer()
-    tags: set[str] = set()
-    tot, n, heads = 0.0, 0, []
+    all_tags: set[str] = set()
+    co_tags: set[str] = set()              # company-specific event tags only (drive hard flags)
+    co_scores, sec_scores = [], []         # idiosyncratic tone pools
+    n_company = n_sector = n_market = 0
+    wsum = tot = 0.0
+    n, heads = 0, []
     for it in items:
         pub = it["published_at"]
         if pub.tzinfo is None:
@@ -76,28 +114,45 @@ def news_signal(ticker: str, max_items: int = 8, days: int = 14) -> dict:
             continue
         text = f"{it['title']}. {it.get('body', '')}"
         s = sc.score_signed(text)
-        # blend in Marketaux's own sentiment (0-1, 0.5 neutral) as a light second opinion
-        mxs = it.get("mx_sent")
+        mxs = it.get("mx_sent")            # blend Marketaux's own score (0-1, 0.5 neutral), light
         if isinstance(mxs, (int, float)):
             s = 0.7 * s + 0.3 * max(-1.0, min(1.0, (float(mxs) - 0.5) * 2))
         tg = detect_event_tags(text)
-        tags |= set(tg)
-        tot += s
+        all_tags |= set(tg)
+        scope = _scope(ticker, it["title"])
+        w = _SCOPE_W[scope]
+        tot += w * s
+        wsum += w
+        if scope == "company":
+            n_company += 1; co_scores.append(s); co_tags |= set(tg)
+        elif scope == "sector":
+            n_sector += 1; sec_scores.append(s)
+        else:
+            n_market += 1
         n += 1
         heads.append({"title": it["title"][:120], "score": round(s, 2), "tags": tg,
-                      "at": pub.strftime("%Y-%m-%d")})
+                      "at": pub.strftime("%Y-%m-%d"), "scope": scope})
 
     if n == 0:
-        return {"ok": True, "n": 0, "net": 0.0, "tags": [], "bearish": False,
-                "bullish": False, "top": [], "source": source}
+        return {"ok": True, "n": 0, "net": 0.0, "tags": [], "bearish": False, "bullish": False,
+                "top": [], "source": source, "n_company": 0, "n_sector": 0, "n_market": 0}
 
-    net = tot / n
-    bear_tags = sorted(tags & BEARISH_TAGS)
-    bull_tags = sorted(tags & BULLISH_TAGS)
-    bearish = bool(bear_tags) or net <= -0.35
-    bullish = bool(bull_tags) and net >= 0.10 and not bearish
+    # scope-weighted net (company-dominant; pure market commentary contributes 0)
+    net = (tot / wsum) if wsum > 0 else 0.0
+    co_net = sum(co_scores) / len(co_scores) if co_scores else 0.0
+    sec_net = sum(sec_scores) / len(sec_scores) if sec_scores else 0.0
+
+    bear_tags = sorted(co_tags & BEARISH_TAGS)          # only COMPANY catalysts veto
+    bull_tags = sorted(co_tags & BULLISH_TAGS)
+    # flags fire on company-specific catalysts/tone; strong broad sector tone is a weaker trigger
+    bearish = bool(bear_tags) or (n_company and co_net <= -0.35) or (n_sector >= 2 and sec_net <= -0.55)
+    bullish = (bool(bull_tags) or (n_company and co_net >= 0.25)) and net >= 0.10 and not bearish
+    # company-specific headlines first in the preview
+    heads.sort(key=lambda h: {"company": 0, "sector": 1, "market": 2}[h["scope"]])
     return {
-        "ok": True, "n": n, "net": round(net, 3), "tags": sorted(tags),
+        "ok": True, "n": n, "net": round(net, 3), "co_net": round(co_net, 3),
+        "sec_net": round(sec_net, 3), "n_company": n_company, "n_sector": n_sector,
+        "n_market": n_market, "tags": sorted(all_tags), "co_tags": sorted(co_tags),
         "bear_tags": bear_tags, "bull_tags": bull_tags,
         "bearish": bearish, "bullish": bullish, "top": heads[:3], "source": source,
     }

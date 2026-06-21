@@ -1,168 +1,74 @@
 {
   "generated": "2026-06-21",
   "source": "marketaux",
-  "window_days": 3,
-  "n_events": 117,
-  "n_symbols": 19,
+  "n_events": 156,
+  "n_company_specific": 45,
+  "n_market_commentary": 111,
+  "n_symbols": 20,
   "date_span": [
-    "2026-04-29",
+    "2026-04-24",
     "2026-05-14"
   ],
-  "single_tone": {
-    "positive (sgn>+0.10)": {
-      "1": {
-        "car": 0.19,
-        "p_pos": 55,
-        "n": 20
-      },
-      "5": {
-        "car": -0.21,
-        "p_pos": 55,
-        "n": 20
-      },
-      "10": {
-        "car": 0.2,
-        "p_pos": 50,
-        "n": 20
-      },
-      "20": {
-        "car": 1.24,
-        "p_pos": 55,
-        "n": 20
-      }
+  "lesson": "Most entity-tagged items are market commentary with ~no idiosyncratic effect; trust COMPANY-SPECIFIC news (title names the company) for single-stock calls.",
+  "cuts_20d": {
+    "company-specific, POSITIVE tone": {
+      "car": -2.34,
+      "p_pos": 53,
+      "n": 17
     },
-    "neutral (|sgn|<=0.10)": {
-      "1": {
-        "car": 0.26,
-        "p_pos": 50,
-        "n": 10
-      },
-      "5": {
-        "car": 4.41,
-        "p_pos": 80,
-        "n": 10
-      },
-      "10": {
-        "car": 6.03,
-        "p_pos": 80,
-        "n": 10
-      },
-      "20": {
-        "car": 8.1,
-        "p_pos": 90,
-        "n": 10
-      }
+    "company-specific, NEGATIVE tone": {
+      "car": 13.37,
+      "p_pos": 86,
+      "n": 7
     },
-    "negative (sgn<-0.10)": {
-      "1": {
-        "car": -0.75,
-        "p_pos": 37,
-        "n": 87
-      },
-      "5": {
-        "car": -0.15,
-        "p_pos": 47,
-        "n": 87
-      },
-      "10": {
-        "car": 0.51,
-        "p_pos": 56,
-        "n": 87
-      },
-      "20": {
-        "car": 1.94,
-        "p_pos": 67,
-        "n": 87
-      }
+    "company-specific, neutral": {
+      "car": 0.22,
+      "p_pos": 81,
+      "n": 21
+    },
+    "MARKET-commentary, POSITIVE tone": {
+      "car": 0.56,
+      "p_pos": 50,
+      "n": 40
+    },
+    "MARKET-commentary, NEGATIVE tone": {
+      "car": 0.67,
+      "p_pos": 75,
+      "n": 8
     }
   },
-  "compounding": {
-    "compound +tone, HIGH intensity": null,
-    "compound +tone, low intensity": {
-      "1": {
-        "car": 0.13,
-        "p_pos": 40,
-        "n": 10
-      },
-      "5": {
-        "car": -0.25,
-        "p_pos": 50,
-        "n": 10
-      },
-      "10": {
-        "car": 1.82,
-        "p_pos": 60,
-        "n": 10
-      },
-      "20": {
-        "car": 1.26,
-        "p_pos": 40,
-        "n": 10
-      }
+  "by_event_type_20d": {},
+  "compounding_20d": {
+    "company news, 1 item": {
+      "car": 3.0,
+      "p_pos": 73,
+      "n": 37
     },
-    "compound -tone, HIGH intensity": {
-      "1": {
-        "car": -1.22,
-        "p_pos": 39,
-        "n": 57
-      },
-      "5": {
-        "car": -0.5,
-        "p_pos": 51,
-        "n": 57
-      },
-      "10": {
-        "car": -0.01,
-        "p_pos": 56,
-        "n": 57
-      },
-      "20": {
-        "car": 1.08,
-        "p_pos": 63,
-        "n": 57
-      }
-    },
-    "compound -tone, low intensity": {
-      "1": {
-        "car": 0.12,
-        "p_pos": 39,
-        "n": 41
-      },
-      "5": {
-        "car": 0.99,
-        "p_pos": 49,
-        "n": 41
-      },
-      "10": {
-        "car": 1.66,
-        "p_pos": 56,
-        "n": 41
-      },
-      "20": {
-        "car": 3.99,
-        "p_pos": 76,
-        "n": 41
-      }
+    "company news, 2+ items (compounded)": {
+      "car": -6.57,
+      "p_pos": 62,
+      "n": 8
     }
   },
   "information_coefficient": {
-    "sgn": {
-      "1": -0.013,
-      "5": -0.02,
-      "10": -0.002,
-      "20": -0.034
+    "company_tone": {
+      "1": -0.081,
+      "5": 0.005,
+      "10": -0.068,
+      "20": -0.2
     },
-    "comp_tone": {
-      "1": -0.016,
-      "5": -0.067,
-      "10": 0.01,
-      "20": 0.015
-    },
-    "intensity": {
-      "1": -0.007,
-      "5": 0.072,
-      "10": 0.054,
-      "20": -0.022
+    "market_tone": {
+      "1": -0.028,
+      "5": -0.099,
+      "10": 0.028,
+      "20": -0.076
     }
+  },
+  "out_of_sample": {
+    "train_dir_acc": 0.26,
+    "n_train": 27,
+    "test_dir_acc": 0.17,
+    "n_test": 18,
+    "test_ic20": -0.295
   }
 }

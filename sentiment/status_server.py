@@ -266,14 +266,15 @@ async function analyze(){
    <div style="margin-top:8px;font-size:13px"><span class="g">▲ for</span> ${(d.drivers||[]).join('; ')||'—'}</div>
    <div style="font-size:13px"><span class="r">▼ against</span> ${(d.drags||[]).join('; ')||'—'}</div>
    <div style="margin-top:8px;font-size:13px">Measured base rate: ${brTxt}</div>
-   <div style="margin-top:4px;font-size:13px">News: ${newsTxt} ${ns.tags&&ns.tags.length?'['+ns.tags.join(', ')+']':''}</div>
-   ${(ns.top||[]).map(h=>`<div class="mut" style="font-size:12px">• [${h.score>0?'+':''}${h.score}] ${h.title}</div>`).join('')}
+   <div style="margin-top:4px;font-size:13px">News: ${newsTxt} ${ns.tags&&ns.tags.length?'['+ns.tags.join(', ')+']':''} ${(ns.n_company!=null)?`<span class="mut">· ${ns.n_company} company / ${ns.n_sector||0} sector / ${ns.n_market||0} market</span>`:''}</div>
+   ${(ns.top||[]).map(h=>`<div class="mut" style="font-size:12px">• <span style="opacity:.7">[${h.scope||'news'}]</span> [${h.score>0?'+':''}${h.score}] ${h.title}</div>`).join('')}
    <hr style="border:0;border-top:1px solid var(--ln);margin:10px 0">
    <div style="font-weight:700;margin-bottom:4px">How it's likely to play out</div>
    <div style="font-size:13px;margin-bottom:3px"><b>News effect:</b> ${dp.news_effect||'—'}</div>
    <div style="font-size:13px;margin-bottom:3px"><b>Public (retail) reaction:</b> ${dp.public_reaction||'—'}</div>
    <div style="font-size:13px;margin-bottom:3px"><b>Investor (institutional) reaction:</b> ${dp.investor_reaction||'—'}</div>
    ${dp.measured_reaction?`<div style="font-size:13px;margin-bottom:3px"><b>📊 Measured (event study):</b> ${dp.measured_reaction}</div>`:''}
+   ${dp.news_measured?`<div style="font-size:13px;margin-bottom:3px"><b>📰 Measured (news→reaction):</b> ${dp.news_measured}</div>`:''}
    ${path.length?`<div style="font-size:13px;margin-top:6px"><b>Expected price path</b> <span class="mut">(this stock after similar setups)</span>: ${path.map(p=>`<span style="white-space:nowrap">+${p.d}d <span class="${p.mean>0?'g':'r'}">${p.mean>0?'+':''}${p.mean}%</span> (${p.p_pos}%↑)</span>`).join(' · ')}</div>`:''}
    <div style="margin-top:10px;padding:10px;border:1px solid var(--ln);border-radius:8px">
      <div style="font-size:13px"><b class="g">BUY —</b> ${dp.entry_timing||'—'}</div>

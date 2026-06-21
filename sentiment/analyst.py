@@ -25,6 +25,14 @@ try:
 except Exception:  # noqa: BLE001
     _EVENT_MODEL = {}
 
+# learned news->reaction model (news_learn.py): lesson + measured cuts; empty if not built
+_NEWS_MODEL = {}
+try:
+    with open(os.path.join(os.path.dirname(__file__), "news_reaction_model.json")) as _fh:
+        _NEWS_MODEL = json.load(_fh)
+except Exception:  # noqa: BLE001
+    _NEWS_MODEL = {}
+
 
 # event tag -> (bias, horizon, how the move usually behaves)
 NEWS_PLAYBOOK = {
@@ -78,17 +86,26 @@ def forward_path(ticker: str, horizons=(1, 5, 10, 20)) -> dict:
 
 def interpret(v: dict, ns: dict, path: dict) -> dict:
     """Turn facts into the reaction chain + a buy/sell timing plan."""
-    tags = (ns or {}).get("tags", []) if ns and ns.get("ok") else []
-    net = (ns or {}).get("net", 0.0) if ns and ns.get("ok") else 0.0
+    ok = bool(ns and ns.get("ok"))
+    # LEARNED: only COMPANY-SPECIFIC news moves the single stock; market commentary is beta.
+    tags = (ns.get("co_tags") or ns.get("tags", [])) if ok else []
+    net = (ns.get("co_net", ns.get("net", 0.0))) if ok else 0.0       # idiosyncratic tone
+    n_co = ns.get("n_company", 0) if ok else 0
+    n_mkt = (ns.get("n_market", 0) + ns.get("n_sector", 0)) if ok else 0
     pfh = v.get("pct_from_hi")
     plays = [{"tag": t, "bias": NEWS_PLAYBOOK[t][0], "window": NEWS_PLAYBOOK[t][1], "note": NEWS_PLAYBOOK[t][2]}
              for t in tags if t in NEWS_PLAYBOOK]
 
-    # NEWS EFFECT
+    # NEWS EFFECT — distinguish company catalyst from market/sector noise (the learned rule)
     if plays:
         news_effect = "; ".join(f"{p['tag']} → {p['bias']} ({p['window']}): {p['note']}" for p in plays)
-    elif ns and ns.get("ok") and abs(net) >= 0.2:
-        news_effect = f"No hard catalyst; general tone {'positive' if net>0 else 'negative'} (net {net:+.2f})."
+    elif n_co and abs(net) >= 0.2:
+        news_effect = (f"Company-specific tone {'positive' if net>0 else 'negative'} "
+                       f"(net {net:+.2f}, {n_co} item{'s' if n_co!=1 else ''}); no hard catalyst tag.")
+    elif n_mkt and not n_co:
+        news_effect = (f"Only market/sector commentary ({n_mkt} items), no company-specific catalyst — "
+                       "the stock will track the market/sector, not react on its own (this is beta, "
+                       "already in the index).")
     else:
         news_effect = "No material news — price action will be driven by valuation + flows, not a catalyst."
 
@@ -159,6 +176,18 @@ def interpret(v: dict, ns: dict, path: dict) -> dict:
                         + f", market-adjusted return averaged {m['20']['car']:+.1f}% over 20 days "
                         f"({m['20']['p_pos']}% positive) — {edge}.")
 
+    # LEARNED news->reaction model (news_learn.py): report the honest, measured finding
+    news_measured = ""
+    if _NEWS_MODEL.get("information_coefficient"):
+        ic = _NEWS_MODEL["information_coefficient"].get("company_tone", {}).get("20")
+        ncs = _NEWS_MODEL.get("n_company_specific", 0)
+        if ic is not None:
+            reln = ("contrarian (negative news tended to bounce)" if ic < -0.1
+                    else "follow-through" if ic > 0.1 else "no reliable direction")
+            news_measured = (f"News-reaction model (n={ncs} company-specific events): company-tone vs "
+                             f"+20d return IC {ic:+.2f} → {reln}; market commentary showed no effect. "
+                             "Sample is small/recent — used as context, NOT a sizing signal.")
+
     return {"news_effect": news_effect, "public_reaction": public, "investor_reaction": investor,
-            "measured_reaction": measured,
+            "measured_reaction": measured, "news_measured": news_measured,
             "entry_timing": entry, "hold_window": hold, "exit_timing": sell, "plays": plays}
