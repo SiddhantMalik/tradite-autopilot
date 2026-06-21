@@ -155,8 +155,10 @@ def api_analyze(symbol: str = ""):
                            "uncond": br.get("uncond"),
                            "setup": f"RSI {br.get('rsi',0):.0f}, {br.get('position','')}"}
                           if not br.get("error") else {"error": br.get("error")}),
-            "news": ({"net": ns.get("net"), "tags": ns.get("tags"), "bearish": ns.get("bearish"),
-                      "bullish": ns.get("bullish"), "top": ns.get("top", [])}
+            "news": ({"net": ns.get("net"), "co_net": ns.get("co_net"), "tags": ns.get("tags"),
+                      "bearish": ns.get("bearish"), "bullish": ns.get("bullish"),
+                      "n_company": ns.get("n_company"), "n_sector": ns.get("n_sector"),
+                      "n_market": ns.get("n_market"), "top": ns.get("top", [])}
                      if ns.get("ok") else {"n": 0}),
             "path": path.get("path", []) if path.get("ok") else [],
             "deep": deep,
