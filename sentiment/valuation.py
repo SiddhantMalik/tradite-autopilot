@@ -20,12 +20,14 @@ apply to banks/financials (D/E, current ratio) are skipped for them.
 """
 from __future__ import annotations
 
+import os
 import numpy as np
 
 from .fundamentals import fetch_fundamentals
 from .base_rates import _load_close, _rsi_series
 
 GSEC_YIELD = 7.0  # approx Indian 10y G-sec; a fixed assumption, not a live feed.
+MARKET_PE = float(os.getenv("TRADITE_MARKET_PE", "23"))  # ~Nifty median P/E — the cheapness anchor
 
 
 def _num(x, nd=1):
@@ -63,64 +65,77 @@ def value_verdict(ticker: str, peer_pe_median: float | None = None) -> dict:
     earn_yield = (100.0 / pe) if isinstance(pe, (int, float)) and pe > 0 else float("nan")
 
     card: list[tuple[str, float, str]] = []
+    anchor = float(peer_pe_median) if peer_pe_median else MARKET_PE   # P/E baseline to judge cheapness
+    val = qual = pos = 0.0
 
-    # ---- Valuation: is it cheap? ----
+    def add(bucket: str, name: str, pts: float, detail: str):
+        nonlocal val, qual, pos
+        card.append((name, pts, detail))
+        if bucket == "v": val += pts
+        elif bucket == "q": qual += pts
+        else: pos += pts
+
+    # ---- VALUATION (price vs worth) — this GATES the verdict ----
+    if isinstance(pe, (int, float)) and pe > 0:
+        r = pe / anchor
+        if r < 0.6:    add("v", "P/E far below market", 2, f"P/E {pe:.0f} vs mkt {anchor:.0f}")
+        elif r < 0.85: add("v", "P/E below market", 1, f"P/E {pe:.0f} vs mkt {anchor:.0f}")
+        elif r > 1.6:  add("v", "P/E far above market", -2, f"P/E {pe:.0f} vs mkt {anchor:.0f}")
+        elif r > 1.2:  add("v", "P/E above market", -1, f"P/E {pe:.0f} vs mkt {anchor:.0f}")
     if isinstance(peg, (int, float)) and peg > 0:
-        if peg < 1:      card.append(("PEG < 1 (cheap for its growth)", 2, f"PEG {peg:.1f}"))
-        elif peg < 1.5:  card.append(("PEG 1–1.5 (reasonable)", 1, f"PEG {peg:.1f}"))
-        elif peg > 2.5:  card.append(("PEG > 2.5 (expensive vs growth)", -1, f"PEG {peg:.1f}"))
-    if isinstance(pe, (int, float)) and pe > 0 and peer_pe_median:
-        r = pe / peer_pe_median
-        if r < 0.8:   card.append(("P/E well below peers", 1, f"P/E {pe:.0f} vs peer {peer_pe_median:.0f}"))
-        elif r > 1.3: card.append(("P/E well above peers", -1, f"P/E {pe:.0f} vs peer {peer_pe_median:.0f}"))
+        if peg < 1:     add("v", "PEG < 1 (cheap for growth)", 1.5, f"PEG {peg:.1f}")
+        elif peg > 2.5: add("v", "PEG > 2.5 (dear vs growth)", -1.5, f"PEG {peg:.1f}")
+        elif peg > 2:   add("v", "PEG > 2", -0.5, f"PEG {peg:.1f}")
     if np.isfinite(earn_yield):
-        spread = earn_yield - GSEC_YIELD
-        if spread > 2:    card.append(("earnings yield > G-sec+2% (cheap vs bonds)", 1, f"EY {earn_yield:.1f}% vs {GSEC_YIELD:.0f}%"))
-        elif spread < -3: card.append(("earnings yield far below G-sec (rich)", -1, f"EY {earn_yield:.1f}% vs {GSEC_YIELD:.0f}%"))
+        sp = earn_yield - GSEC_YIELD
+        if sp > 2:     add("v", "earnings yield > G-sec+2%", 1, f"EY {earn_yield:.1f}%")
+        elif sp < -3:  add("v", "earnings yield far below G-sec", -1.5, f"EY {earn_yield:.1f}%")
+        elif sp < 0:   add("v", "earnings yield below G-sec", -0.5, f"EY {earn_yield:.1f}%")
     if isinstance(pb, (int, float)) and isinstance(roe, (int, float)):
-        if pb > 5 and roe < 0.18:  card.append(("high P/B unjustified by ROE", -1, f"P/B {pb:.1f}, ROE {roe*100:.0f}%"))
-        elif pb < 3 and roe > 0.15: card.append(("low P/B with solid ROE", 1, f"P/B {pb:.1f}, ROE {roe*100:.0f}%"))
+        if pb < 3 and roe > 0.15:   add("v", "low P/B w/ solid ROE", 1, f"P/B {pb:.1f}")
+        elif pb > 6 and roe < 0.20: add("v", "high P/B not backed by ROE", -1, f"P/B {pb:.1f}")
 
-    # ---- Quality: is it a good business? ----
+    # ---- QUALITY (capped so a great business can't look 'cheap') ----
     if isinstance(roe, (int, float)):
-        if roe > 0.20:   card.append(("ROE > 20% (excellent)", 2, f"ROE {roe*100:.0f}%"))
-        elif roe > 0.12: card.append(("ROE 12–20% (good)", 1, f"ROE {roe*100:.0f}%"))
-        elif roe < 0.08: card.append(("ROE < 8% (weak)", -1, f"ROE {roe*100:.0f}%"))
+        if roe > 0.20:   add("q", "ROE > 20% (excellent)", 1.5, f"{roe*100:.0f}%")
+        elif roe > 0.12: add("q", "ROE 12–20% (good)", 0.75, f"{roe*100:.0f}%")
+        elif roe < 0.08: add("q", "ROE < 8% (weak)", -1, f"{roe*100:.0f}%")
     if isinstance(margin, (int, float)) and margin > 0.15:
-        card.append(("net margin > 15%", 1, f"{margin*100:.0f}%"))
+        add("q", "net margin > 15%", 0.5, f"{margin*100:.0f}%")
     if not is_financial and isinstance(dte, (int, float)):
-        if dte < 50:    card.append(("low debt (D/E < 50%)", 1, f"D/E {dte:.0f}%"))
-        elif dte > 150: card.append(("high debt (D/E > 150%)", -1, f"D/E {dte:.0f}%"))
-
-    # ---- Growth ----
+        if dte < 50:    add("q", "low debt (D/E < 50%)", 0.5, f"D/E {dte:.0f}%")
+        elif dte > 150: add("q", "high debt (D/E > 150%)", -1, f"D/E {dte:.0f}%")
     if isinstance(earn_g, (int, float)):
-        if earn_g > 0.12:  card.append(("earnings growth > 12%", 1, f"{earn_g*100:.0f}%"))
-        elif earn_g < 0:   card.append(("earnings shrinking", -1, f"{earn_g*100:.0f}%"))
-    if isinstance(rev_g, (int, float)) and rev_g > 0.10:
-        card.append(("revenue growth > 10%", 0.5, f"{rev_g*100:.0f}%"))
+        if earn_g > 0.12: add("q", "earnings growth > 12%", 0.5, f"{earn_g*100:.0f}%")
+        elif earn_g < 0:  add("q", "earnings shrinking", -1, f"{earn_g*100:.0f}%")
 
-    # ---- Price position: penalise chasing highs (the anti-momentum part) ----
+    # ---- PRICE POSITION (don't chase highs) ----
     if np.isfinite(pct_from_hi):
-        if pct_from_hi > -5:                       card.append(("at/near 52w HIGH (extended — chasing)", -1.5, f"{pct_from_hi:+.0f}% vs 52wH"))
-        elif -40 < pct_from_hi < -12:              card.append(("reasonable pullback off the high", 1, f"{pct_from_hi:+.0f}% vs 52wH"))
+        if pct_from_hi > -5:           add("p", "at/near 52w HIGH (extended)", -1.5, f"{pct_from_hi:+.0f}% vs 52wH")
+        elif -40 < pct_from_hi < -12:  add("p", "reasonable pullback off high", 1, f"{pct_from_hi:+.0f}% vs 52wH")
     if np.isfinite(rsi) and rsi > 70:
-        card.append(("RSI > 70 (overbought)", -0.5, f"RSI {rsi:.0f}"))
+        add("p", "RSI > 70 (overbought)", -0.5, f"RSI {rsi:.0f}")
     if np.isfinite(pct_from_hi) and pct_from_hi < -50 and isinstance(earn_g, (int, float)) and earn_g < 0:
-        card.append(("down >50% AND earnings falling (value-trap risk)", -1, f"{pct_from_hi:+.0f}%, EPS {earn_g*100:.0f}%"))
+        add("p", "down >50% & earnings falling (value trap)", -1.5, f"{pct_from_hi:+.0f}%")
 
-    score = float(sum(p for _, p, _ in card))
+    qual = min(qual, 2.5)                 # a great business is NOT a buy at any price
+    score = round(val + qual + pos, 2)
 
-    if score >= 4:     verdict = "WORTH BUYING — undervalued/quality at this price"
-    elif score >= 1.5: verdict = "FAIR — accumulate on dips"
-    elif score > -1:   verdict = "HOLD / NEUTRAL — fairly priced, no margin of safety"
-    else:              verdict = "AVOID — expensive / chasing / weak business"
-
-    # Expensive override: a great business at a demanding price is NOT a buy at THIS
-    # price — cap the verdict so quality can't paper over a stretched multiple.
+    # VALUATION-GATED verdict: price is the gate, quality/position the tiebreaker
     expensive = (np.isfinite(earn_yield) and earn_yield < 2.5) or \
-                (isinstance(pe, (int, float)) and pe > 0 and peer_pe_median and pe > 1.8 * peer_pe_median)
-    if expensive and verdict.startswith(("WORTH BUYING", "FAIR")):
-        verdict = "HOLD / WAIT — quality but expensive at this price (wait for a pullback)"
+                (isinstance(pe, (int, float)) and pe > 0 and pe > 1.6 * anchor)
+    extended = np.isfinite(pct_from_hi) and pct_from_hi > -3
+    if expensive:
+        verdict = ("AVOID — expensive at this price" if (extended or val <= -2)
+                   else "HOLD / WAIT — quality but expensive (wait for a pullback)")
+    elif val >= 2 and score >= 5 and not extended:
+        verdict = "WORTH BUYING — cheap & quality at this price"
+    elif val >= 0.5 and score >= 2.5:
+        verdict = "FAIR — reasonably priced; accumulate on dips"
+    elif val <= -1.5 or score <= -1:
+        verdict = "AVOID — expensive / chasing / weak"
+    else:
+        verdict = "HOLD / NEUTRAL — fairly priced, no clear edge"
 
     # heuristic 'reasonable buy-below' = fair P/E / current P/E × price, where fair P/E is the
     # MEDIAN of three anchors: a quality-justified multiple (higher ROE earns a higher multiple),
