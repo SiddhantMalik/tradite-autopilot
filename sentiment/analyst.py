@@ -13,8 +13,17 @@ project's market grounding — not a crystal ball.
 """
 from __future__ import annotations
 
+import json, os
 import numpy as np
 from .base_rates import _load_close, _rsi_series, _regime, _position
+
+# measured post-shock behaviour from the event study (event_study.py); empty if not built yet
+_EVENT_MODEL = {}
+try:
+    with open(os.path.join(os.path.dirname(__file__), "event_model.json")) as _fh:
+        _EVENT_MODEL = json.load(_fh)
+except Exception:  # noqa: BLE001
+    _EVENT_MODEL = {}
 
 
 # event tag -> (bias, horizon, how the move usually behaves)
@@ -63,7 +72,8 @@ def forward_path(ticker: str, horizons=(1, 5, 10, 20)) -> dict:
             u = fwd.dropna().values
             out.append({"d": h, "mean": round(float(np.mean(u)) * 100, 2),
                         "p_pos": round(float(np.mean(u > 0)) * 100), "n": int(len(u)), "thin": True})
-    return {"ok": True, "setup": f"RSI {float(rsi.iloc[-1]):.0f} ({reg_today}), {pos_today}", "path": out}
+    return {"ok": True, "pos": pos_today,
+            "setup": f"RSI {float(rsi.iloc[-1]):.0f} ({reg_today}), {pos_today}", "path": out}
 
 
 def interpret(v: dict, ns: dict, path: dict) -> dict:
@@ -135,5 +145,20 @@ def interpret(v: dict, ns: dict, path: dict) -> dict:
             hold = "This setup historically did NOT pay over the next month — wait for a better entry."
             sell = "If already holding: tighten the trailing stop; this setup tends to underperform."
 
+    # MEASURED reaction from the event study (data, not assumptions)
+    measured = ""
+    direction = ("up" if (net > 0.1 or any(p["bias"] == "bullish" for p in plays))
+                 else "down" if (net < -0.1 or any(p["bias"] == "bearish" for p in plays)) else "")
+    pos = path.get("pos") if path.get("ok") else None
+    if direction and _EVENT_MODEL.get("by_dir"):
+        m = _EVENT_MODEL.get("by_dir_pos", {}).get(f"{direction}|{pos}") or _EVENT_MODEL["by_dir"].get(direction)
+        if m and "20" in m:
+            edge = "a faint historical edge" if abs(m["20"]["car"]) >= 1.5 else "essentially coin-flip (efficient)"
+            measured = (f"Event study (n={m['n']:,}): after a {direction}-shock"
+                        + (f" from a {pos} base" if pos else "")
+                        + f", market-adjusted return averaged {m['20']['car']:+.1f}% over 20 days "
+                        f"({m['20']['p_pos']}% positive) — {edge}.")
+
     return {"news_effect": news_effect, "public_reaction": public, "investor_reaction": investor,
+            "measured_reaction": measured,
             "entry_timing": entry, "hold_window": hold, "exit_timing": sell, "plays": plays}

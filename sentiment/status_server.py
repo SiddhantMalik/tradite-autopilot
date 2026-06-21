@@ -273,6 +273,7 @@ async function analyze(){
    <div style="font-size:13px;margin-bottom:3px"><b>News effect:</b> ${dp.news_effect||'—'}</div>
    <div style="font-size:13px;margin-bottom:3px"><b>Public (retail) reaction:</b> ${dp.public_reaction||'—'}</div>
    <div style="font-size:13px;margin-bottom:3px"><b>Investor (institutional) reaction:</b> ${dp.investor_reaction||'—'}</div>
+   ${dp.measured_reaction?`<div style="font-size:13px;margin-bottom:3px"><b>📊 Measured (event study):</b> ${dp.measured_reaction}</div>`:''}
    ${path.length?`<div style="font-size:13px;margin-top:6px"><b>Expected price path</b> <span class="mut">(this stock after similar setups)</span>: ${path.map(p=>`<span style="white-space:nowrap">+${p.d}d <span class="${p.mean>0?'g':'r'}">${p.mean>0?'+':''}${p.mean}%</span> (${p.p_pos}%↑)</span>`).join(' · ')}</div>`:''}
    <div style="margin-top:10px;padding:10px;border:1px solid var(--ln);border-radius:8px">
      <div style="font-size:13px"><b class="g">BUY —</b> ${dp.entry_timing||'—'}</div>
