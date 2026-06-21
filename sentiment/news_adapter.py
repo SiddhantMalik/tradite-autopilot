@@ -89,10 +89,20 @@ def _gather_items(ticker: str, max_items: int) -> tuple[list[dict], str]:
     return out, "google_rss"
 
 
+# in-memory TTL cache — Marketaux free tier is ~100 req/day, shared by every decide cycle.
+# Without this the intraday scheduler (≈22 names × 13 cycles) would exhaust the quota in an hour.
+_CACHE: dict[str, tuple[float, dict]] = {}
+_TTL_S = float(os.getenv("TRADITE_NEWS_TTL_MIN", "180")) * 60
+
+
 def news_signal(ticker: str, max_items: int = 8, days: int = 14) -> dict:
-    """Recent-news signal for one ticker. Never raises — degrades to {ok:False}."""
+    """Recent-news signal for one ticker. Never raises — degrades to {ok:False}. TTL-cached."""
     if not USE_NEWS:
         return {"ok": False, "disabled": True}
+    import time
+    hit = _CACHE.get(ticker)
+    if hit and (time.time() - hit[0]) < _TTL_S:
+        return hit[1]
     try:
         items, source = _gather_items(ticker, max_items)
     except Exception as e:  # noqa: BLE001
@@ -134,8 +144,10 @@ def news_signal(ticker: str, max_items: int = 8, days: int = 14) -> dict:
                       "at": pub.strftime("%Y-%m-%d"), "scope": scope})
 
     if n == 0:
-        return {"ok": True, "n": 0, "net": 0.0, "tags": [], "bearish": False, "bullish": False,
-                "top": [], "source": source, "n_company": 0, "n_sector": 0, "n_market": 0}
+        empty = {"ok": True, "n": 0, "net": 0.0, "tags": [], "bearish": False, "bullish": False,
+                 "top": [], "source": source, "n_company": 0, "n_sector": 0, "n_market": 0}
+        _CACHE[ticker] = (time.time(), empty)
+        return empty
 
     # scope-weighted net (company-dominant; pure market commentary contributes 0)
     net = (tot / wsum) if wsum > 0 else 0.0
@@ -149,10 +161,12 @@ def news_signal(ticker: str, max_items: int = 8, days: int = 14) -> dict:
     bullish = (bool(bull_tags) or (n_company and co_net >= 0.25)) and net >= 0.10 and not bearish
     # company-specific headlines first in the preview
     heads.sort(key=lambda h: {"company": 0, "sector": 1, "market": 2}[h["scope"]])
-    return {
+    result = {
         "ok": True, "n": n, "net": round(net, 3), "co_net": round(co_net, 3),
         "sec_net": round(sec_net, 3), "n_company": n_company, "n_sector": n_sector,
         "n_market": n_market, "tags": sorted(all_tags), "co_tags": sorted(co_tags),
         "bear_tags": bear_tags, "bull_tags": bull_tags,
         "bearish": bearish, "bullish": bullish, "top": heads[:3], "source": source,
     }
+    _CACHE[ticker] = (time.time(), result)
+    return result
