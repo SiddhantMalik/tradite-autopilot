@@ -140,6 +140,9 @@ def api_analyze(symbol: str = ""):
         sc = v.get("scorecard", [])
         br = base_rate(tkr)
         ns = news_signal(tkr)
+        from .analyst import forward_path, interpret
+        path = forward_path(tkr)
+        deep = interpret(v, ns, path)
         return JSONResponse({
             "symbol": sym, "name": v.get("name"), "sector": v.get("sector"),
             "price": v.get("price"), "verdict": v.get("verdict"), "score": v.get("score"),
@@ -155,6 +158,8 @@ def api_analyze(symbol: str = ""):
             "news": ({"net": ns.get("net"), "tags": ns.get("tags"), "bearish": ns.get("bearish"),
                       "bullish": ns.get("bullish"), "top": ns.get("top", [])}
                      if ns.get("ok") else {"n": 0}),
+            "path": path.get("path", []) if path.get("ok") else [],
+            "deep": deep,
         })
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)})
@@ -250,7 +255,7 @@ async function analyze(){
  catch(e){ el.innerHTML='<div class="card r">request failed</div>'; return; }
  if(d.error){ el.innerHTML='<div class="card r">'+d.error+'</div>'; return; }
  const vc=d.verdict&&d.verdict.indexOf('WORTH')===0?'g':(d.verdict&&d.verdict.indexOf('AVOID')===0?'r':'');
- const br=d.base_rate||{}, ns=d.news||{};
+ const br=d.base_rate||{}, ns=d.news||{}, dp=d.deep||{}, path=d.path||[];
  const brTxt = br.error?br.error:(br.verdict?`${br.verdict}${br.cond?` — fwd-20d mean ${f1(br.cond.mean)}% vs base ${f1((d.base_rate.uncond||{}).mean)}% (n=${br.cond.n})`:''}`:'n/a');
  const newsTxt = ns.bearish?'<span class="r">BEARISH</span>':(ns.bullish?'<span class="g">bullish</span>':'neutral');
  el.innerHTML=`<div class="card">
@@ -263,6 +268,17 @@ async function analyze(){
    <div style="margin-top:8px;font-size:13px">Measured base rate: ${brTxt}</div>
    <div style="margin-top:4px;font-size:13px">News: ${newsTxt} ${ns.tags&&ns.tags.length?'['+ns.tags.join(', ')+']':''}</div>
    ${(ns.top||[]).map(h=>`<div class="mut" style="font-size:12px">• [${h.score>0?'+':''}${h.score}] ${h.title}</div>`).join('')}
+   <hr style="border:0;border-top:1px solid var(--ln);margin:10px 0">
+   <div style="font-weight:700;margin-bottom:4px">How it's likely to play out</div>
+   <div style="font-size:13px;margin-bottom:3px"><b>News effect:</b> ${dp.news_effect||'—'}</div>
+   <div style="font-size:13px;margin-bottom:3px"><b>Public (retail) reaction:</b> ${dp.public_reaction||'—'}</div>
+   <div style="font-size:13px;margin-bottom:3px"><b>Investor (institutional) reaction:</b> ${dp.investor_reaction||'—'}</div>
+   ${path.length?`<div style="font-size:13px;margin-top:6px"><b>Expected price path</b> <span class="mut">(this stock after similar setups)</span>: ${path.map(p=>`<span style="white-space:nowrap">+${p.d}d <span class="${p.mean>0?'g':'r'}">${p.mean>0?'+':''}${p.mean}%</span> (${p.p_pos}%↑)</span>`).join(' · ')}</div>`:''}
+   <div style="margin-top:10px;padding:10px;border:1px solid var(--ln);border-radius:8px">
+     <div style="font-size:13px"><b class="g">BUY —</b> ${dp.entry_timing||'—'}</div>
+     <div style="font-size:13px;margin-top:3px"><b>HOLD —</b> ${dp.hold_window||'—'}</div>
+     <div style="font-size:13px;margin-top:3px"><b class="r">SELL —</b> ${dp.exit_timing||'—'}</div>
+   </div>
  </div>`;
 }
 let STOCKS=[];
