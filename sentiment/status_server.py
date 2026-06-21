@@ -64,31 +64,61 @@ def healthz():
     return {"ok": True}
 
 
+def _all_nse_stocks() -> list[dict]:
+    """ALL NSE equity-series stocks [{s,n}] from NSE's EQUITY_L.csv master list, cached ~7 days."""
+    import time, io
+    import pandas as pd
+    import config
+    cache = config.DATA_DIR / "nse_all_equity.csv"
+    df = None
+    try:
+        if cache.exists() and (time.time() - cache.stat().st_mtime) < 7 * 86400:
+            df = pd.read_csv(cache)
+    except Exception:  # noqa: BLE001
+        df = None
+    if df is None:
+        import urllib.request
+        for url in ("https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
+                    "https://archives.nseindia.com/content/equities/EQUITY_L.csv"):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
+                df = pd.read_csv(io.StringIO(raw)); df.to_csv(cache, index=False); break
+            except Exception:  # noqa: BLE001
+                df = None
+    if df is None:
+        return []
+    sc = next((c for c in df.columns if c.strip().upper() == "SYMBOL"), None)
+    nc = next((c for c in df.columns if "NAME" in c.strip().upper()), None)
+    serc = next((c for c in df.columns if c.strip().upper() == "SERIES"), None)
+    out = []
+    for _, r in df.iterrows():
+        if serc and str(r[serc]).strip() != "EQ":
+            continue
+        s = str(r.get(sc, "")).strip()
+        if s and s.lower() != "nan":
+            out.append({"s": s, "n": str(r.get(nc, "")).strip() or s})
+    return out
+
+
 @app.get("/api/universe")
 def api_universe():
-    """Searchable stock list: [{s: symbol, n: company name}] from the Nifty 500 (with names)."""
-    stocks = []
-    try:
-        import pandas as pd
-        import sentiment.screener as S
-        S._load_nifty500()                              # ensure the CSV cache exists
-        df = pd.read_csv(S.NIFTY500_CACHE)
-        symcol = next((c for c in df.columns if c.strip().lower() == "symbol"), None)
-        namecol = next((c for c in df.columns if "name" in c.strip().lower()), None)
-        for _, r in df.iterrows():
-            sym = str(r.get(symcol, "")).strip()
-            nm = str(r.get(namecol, "")).strip() if namecol else sym
-            if sym and sym.lower() != "nan":
-                stocks.append({"s": sym, "n": nm or sym})
-    except Exception:  # noqa: BLE001
-        stocks = []
-    if not stocks:
+    """Searchable list of ALL NSE equities [{s: symbol, n: company name}] (Nifty-500/100 fallback)."""
+    stocks = _all_nse_stocks()
+    if not stocks:                                       # fallback: Nifty 500 then 100
         try:
-            from .screener import _nifty100_fallback
-            stocks = [{"s": t.replace(".NS", ""), "n": t.replace(".NS", "")}
-                      for t in _nifty100_fallback()]
+            import pandas as pd, sentiment.screener as S
+            S._load_nifty500()
+            df = pd.read_csv(S.NIFTY500_CACHE)
+            sc = next((c for c in df.columns if c.strip().lower() == "symbol"), None)
+            ncol = next((c for c in df.columns if "name" in c.strip().lower()), None)
+            stocks = [{"s": str(r.get(sc, "")).strip(), "n": str(r.get(ncol, "")).strip() or str(r.get(sc, "")).strip()}
+                      for _, r in df.iterrows() if str(r.get(sc, "")).strip() not in ("", "nan")]
         except Exception:  # noqa: BLE001
-            stocks = [{"s": x, "n": x} for x in ["TCS", "INFY", "RELIANCE", "HDFCBANK", "SBIN", "ITC"]]
+            stocks = []
+    if not stocks:
+        from .screener import _nifty100_fallback
+        stocks = [{"s": t.replace(".NS", ""), "n": t.replace(".NS", "")} for t in _nifty100_fallback()]
     stocks.sort(key=lambda x: x["s"])
     return JSONResponse({"stocks": stocks})
 
